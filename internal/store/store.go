@@ -47,8 +47,13 @@ func OpenTemp() (*Store, func(), error) {
 	return s, cleanup, nil
 }
 
+// sqliteDefensiveQuery turns on SQLite SQLITE_DBCONFIG_DEFENSIVE (modernc
+// v1.57.0+). Applied in the DSN so it is set after sqlite3_open_v2 and before
+// any statement. Path is still a filesystem path; the driver splits on '?'.
+const sqliteDefensiveQuery = "?_defensive=1"
+
 func open(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath+sqliteDefensiveQuery)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
