@@ -72,6 +72,19 @@ func TestZipPackRoundTrip(t *testing.T) {
 	if sum1 != sum2 {
 		t.Fatalf("zip hash not reproducible:\n%s\n%s", sum1, sum2)
 	}
+	for i := 0; i < 25; i++ {
+		p := filepath.Join(t.TempDir(), "n.opsgraph")
+		if err := ingest.ZipPack(dir, p); err != nil {
+			t.Fatal(err)
+		}
+		sum, err := ingest.FileSHA256(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum != sum1 {
+			t.Fatalf("zip hash drifted on from-scratch run %d:\n%s\n%s", i+1, sum1, sum)
+		}
+	}
 }
 
 func TestUnzipPackRejectsDotDot(t *testing.T) {

@@ -17,6 +17,9 @@ opsgraph demo
 kubectl get deploy,event -o yaml > k8s-snapshot.yaml
 opsgraph ask                   # cwd dump is enough; hottest service
 opsgraph pack                  # writes incident.opsgraph; email one file
+opsgraph incident.opsgraph     # open the emailed file
+opsgraph receipt               # pasteable evidence IDs + score
+opsgraph delta a.opsgraph b.opsgraph
 opsgraph test incident.opsgraph
 
 # From a clone, deterministic fixture:

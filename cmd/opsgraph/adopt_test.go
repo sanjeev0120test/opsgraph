@@ -158,15 +158,119 @@ func TestProveJSON(t *testing.T) {
 	}
 }
 
+func TestProveReceiptOpenStableFromScratch(t *testing.T) {
+	const n = 21
+	fx := fixtureDir(t)
+	var proveSHA, receiptIDs, openBody string
+	for i := 0; i < n; i++ {
+		out, errOut, code := runRoot(t, "prove", "--format", "json")
+		if code != 0 {
+			t.Fatalf("prove run %d exit=%d stderr=%s stdout=%s", i+1, code, errOut, out)
+		}
+		var prove struct {
+			OK         bool   `json:"ok"`
+			PackReplay bool   `json:"pack_replay"`
+			ZipReplay  bool   `json:"zip_replay"`
+			SHA256     string `json:"sha256"`
+			Service    string `json:"service"`
+			Evidence   int    `json:"evidence"`
+		}
+		if err := json.Unmarshal([]byte(out), &prove); err != nil {
+			t.Fatalf("prove run %d json: %v\n%s", i+1, err, out)
+		}
+		if !prove.OK || !prove.PackReplay || !prove.ZipReplay || prove.Service != "checkout" || prove.Evidence == 0 {
+			t.Fatalf("prove run %d envelope: %+v", i+1, prove)
+		}
+		if i == 0 {
+			proveSHA = prove.SHA256
+		} else if prove.SHA256 != proveSHA {
+			t.Fatalf("prove sha256 drifted on from-scratch run %d\n first %s\n got   %s", i+1, proveSHA, prove.SHA256)
+		}
+
+		out, errOut, code = runRoot(t, "receipt", fx, "--format", "json")
+		if code != 0 {
+			t.Fatalf("receipt run %d exit=%d stderr=%s stdout=%s", i+1, code, errOut, out)
+		}
+		if i == 0 {
+			receiptIDs = out
+		} else if out != receiptIDs {
+			t.Fatalf("receipt drifted on from-scratch run %d", i+1)
+		}
+
+		out, errOut, code = runRoot(t, fx, "--format", "json")
+		if code != 0 {
+			t.Fatalf("open-path run %d exit=%d stderr=%s stdout=%s", i+1, code, errOut, out)
+		}
+		if i == 0 {
+			openBody = out
+		} else if out != openBody {
+			t.Fatalf("open-path ask JSON drifted on from-scratch run %d", i+1)
+		}
+	}
+}
+
 func TestRootStartHere(t *testing.T) {
 	out, errOut, code := runRoot(t)
 	if code != 0 {
 		t.Fatalf("root exit=%d stderr=%s stdout=%s", code, errOut, out)
 	}
-	for _, want := range []string{"opsgraph prove", "opsgraph ask", "opsgraph pack", "incident.opsgraph"} {
+	for _, want := range []string{"opsgraph prove", "opsgraph ask", "opsgraph pack", "incident.opsgraph", "opsgraph delta", "opsgraph receipt"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("start-here missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestOpenPackPathAsRootArg(t *testing.T) {
+	fx := fixtureDir(t)
+	out, errOut, code := runRoot(t, fx, "--format", "json")
+	if code != 0 {
+		t.Fatalf("root pack path exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"id": "checkout"`) {
+		t.Fatalf("expected checkout from dropped pack path:\n%s", out)
+	}
+}
+
+func TestReceiptJSON(t *testing.T) {
+	fx := fixtureDir(t)
+	out, errOut, code := runRoot(t, "receipt", fx, "--format", "json")
+	if code != 0 {
+		t.Fatalf("receipt exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var rec struct {
+		OK          bool     `json:"ok"`
+		Service     string   `json:"service"`
+		Health      string   `json:"health"`
+		EvidenceIDs []string `json:"evidence_ids"`
+	}
+	if err := json.Unmarshal([]byte(out), &rec); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if !rec.OK || rec.Service != "checkout" || rec.Health != "degraded" {
+		t.Fatalf("receipt: %+v", rec)
+	}
+	if len(rec.EvidenceIDs) == 0 {
+		t.Fatal("receipt missing evidence ids")
+	}
+}
+
+func TestDeltaSameAndDifferent(t *testing.T) {
+	fx := fixtureDir(t)
+	fleet := filepath.Join(repoRoot(t), "fixtures", "fleet_healthy")
+	out, errOut, code := runRoot(t, "delta", fx, fx, "--format", "json")
+	if code != 0 {
+		t.Fatalf("delta same exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"identical": true`) {
+		t.Fatalf("expected identical:\n%s", out)
+	}
+	out, errOut, code = runRoot(t, "delta", fx, fleet, "--format", "json")
+	if code != 1 {
+		t.Fatalf("delta diff exit=%d want 1 stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"identical": false`) {
+		t.Fatalf("expected not identical:\n%s", out)
 	}
 }
 

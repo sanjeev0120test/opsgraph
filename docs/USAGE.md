@@ -6,11 +6,12 @@
 go build -o bin/opsgraph ./cmd/opsgraph   # or: make build
 ```
 
-`opsgraph` with no args prints a four-step start-here (prove → dump → ask → pack). Full help: `opsgraph --help`.
+`opsgraph` with no args prints a start-here (prove → dump → ask → pack → open/delta). Full help: `opsgraph --help`.
+A pack path as the first argument is opened (`opsgraph incident.opsgraph` equals `opsgraph ask --fixture incident.opsgraph`).
 
 Most inspection commands accept `--format table|json` (default `table`).
 Exceptions: `graph` (`ascii|table|mermaid|json`), `export`/`report` (`json|markdown`), `watch` (`--once` supports `--format json`).
-`status` / `doctor` / `ingest` / `pack` / `prove` / `version` / `validate-fixture` / `test` / `why` / `handoff` / `explain` / `evidence` accept `--format json`.
+`status` / `doctor` / `ingest` / `pack` / `prove` / `open` / `receipt` / `delta` / `version` / `validate-fixture` / `test` / `why` / `handoff` / `explain` / `evidence` accept `--format json`.
 `health --strict` exits `1` when any service is degraded, unhealthy, or unknown (fail-closed); JSON includes `"ok": true|false`.
 Healthy-path CI pack: `fixtures/fleet_healthy` (all services healthy; use with `health --strict`).
 `status` JSON includes `"ok"` / `"has_data"`; `path` JSON includes `"ok"` / `"found"` (missing routes still exit `1` with a JSON envelope).
@@ -102,12 +103,25 @@ opsgraph pack --out ./incident.opsgraph    # single emailable file
 opsgraph pack --fixture fixtures/incident_checkout --out ./incident
 opsgraph test ./incident
 opsgraph test ./incident.opsgraph
-opsgraph ask --fixture ./incident.opsgraph
+opsgraph incident.opsgraph             # drop the file on the binary
+opsgraph receipt ./incident.opsgraph   # pasteable evidence IDs
+opsgraph delta morning.opsgraph now.opsgraph
 ```
 
 Default `--out` is `incident.opsgraph`. `--force` overwrites an existing pack (`meta.yaml` present or empty dir) or an
 existing `.zip`/`.opsgraph`. Pack always self-checks replay before exiting 0.
 Archive bytes are sorted + fixed-mtime so the SHA-256 is stable across OS.
+
+### `opsgraph open [pack]` / `opsgraph receipt [pack]` / `opsgraph delta <before> <after>`
+`open` is the pack viewer (hottest service). A pack path as argv[1] does the same.
+`receipt` prints a pasteable summary: hottest service, score, evidence IDs, optional SHA-256.
+`delta` diffs two packs by evidence ID set (exit 0 identical, 1 if they differ) — the org workflow that SaaS IRM does not offer offline.
+
+```bash
+opsgraph open incident.opsgraph
+opsgraph receipt --fixture fixtures/incident_checkout --format json
+opsgraph delta fixtures/incident_checkout fixtures/fleet_healthy --format json
+```
 
 ### `opsgraph ingest`
 Load a fixture pack (or live config sources) into a persistent data dir.
@@ -168,7 +182,7 @@ Fleet alert list. `--firing` keeps active (`firing`/`pending`) alerts; `--servic
 | `path`, `graph`, `compare`, `who`, `resolve` | Topology / ownership |
 | `report`, `export`, `handoff` | Markdown/JSON/text handoff |
 | `watch` | Poll until healthy (default interval 5s; live/persistent sources) |
-| `validate-fixture`, `completion`, `init`, `pack`, `prove` | Pack checks / completion / starter config / shareable incident / offline proof |
+| `validate-fixture`, `completion`, `init`, `pack`, `prove`, `open`, `receipt`, `delta` | Pack checks / proof / open emailed file / pasteable receipt / evidence-ID diff |
 
 ## Validation
 

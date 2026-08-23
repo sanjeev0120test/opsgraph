@@ -33,7 +33,7 @@ func runRoot(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	var out, errBuf bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errBuf)
-	root.SetArgs(args)
+	root.SetArgs(rewriteRootArgs(root, args))
 	err := root.Execute()
 	return out.String(), errBuf.String(), exitCodeFor(err)
 }

@@ -35,7 +35,8 @@ func newRootCmd() *cobra.Command {
 		}
 	}
 	add("core",
-		newAskCmd(), newWhyCmd(), newExplainCmd(), newHandoffCmd(),
+		newAskCmd(), newOpenCmd(), newReceiptCmd(), newDeltaCmd(),
+		newWhyCmd(), newExplainCmd(), newHandoffCmd(),
 		newScoreCmd(), newFingerprintCmd(), newVerifyRunbookCmd(),
 		newReportCmd(), newExportCmd(), newWatchCmd(),
 	)
@@ -60,8 +61,10 @@ func printStartHere(cmd *cobra.Command) {
   1. Prove it   opsgraph prove
   2. Dump k8s   kubectl get deploy,event -o yaml > k8s-snapshot.yaml
   3. Ask        opsgraph ask
-  4. Share      opsgraph pack
-                → incident.opsgraph  (email it; same JSON on any OS)
+  4. Share      opsgraph pack          → incident.opsgraph
+  5. Open/diff  opsgraph incident.opsgraph
+                opsgraph delta a.opsgraph b.opsgraph
+                opsgraph receipt
 
 More: opsgraph --help   ·   docs: https://github.com/sanjeev0120test/opsgraph
 `)

@@ -46,7 +46,7 @@ func WritePack(s *store.Store, now time.Time, dir string) error {
 	for _, v := range svcs {
 		fxs.Services = append(fxs.Services, fxService{
 			ID: v.ID, Name: v.Name, Aliases: v.Aliases, OwnerID: v.OwnerID,
-			Health: v.Health, Labels: v.Labels, Sources: v.Sources,
+			Health: v.Health, Labels: yamlStringMap(v.Labels), Sources: v.Sources,
 		})
 	}
 	if err := writeYAMLFile(filepath.Join(dir, "services.yaml"), fxs); err != nil {
@@ -77,6 +77,7 @@ func WritePack(s *store.Store, now time.Time, dir string) error {
 			Source: c.Source, EvidenceID: c.EvidenceID,
 		})
 	}
+	sort.Slice(fxc.Changes, func(i, j int) bool { return fxc.Changes[i].ID < fxc.Changes[j].ID })
 	if err := writeYAMLFile(filepath.Join(dir, "changes.yaml"), fxc); err != nil {
 		return err
 	}
@@ -91,6 +92,12 @@ func WritePack(s *store.Store, now time.Time, dir string) error {
 			From: d.FromServiceID, To: d.ToServiceID, Type: d.Type, Source: d.Source,
 		})
 	}
+	sort.Slice(fxd.Dependencies, func(i, j int) bool {
+		if fxd.Dependencies[i].From != fxd.Dependencies[j].From {
+			return fxd.Dependencies[i].From < fxd.Dependencies[j].From
+		}
+		return fxd.Dependencies[i].To < fxd.Dependencies[j].To
+	})
 	if err := writeYAMLFile(filepath.Join(dir, "dependencies.yaml"), fxd); err != nil {
 		return err
 	}
@@ -107,6 +114,7 @@ func WritePack(s *store.Store, now time.Time, dir string) error {
 			EvidenceID: a.EvidenceID,
 		})
 	}
+	sort.Slice(fxa.Alerts, func(i, j int) bool { return fxa.Alerts[i].ID < fxa.Alerts[j].ID })
 	if err := writeYAMLFile(filepath.Join(dir, "alerts.yaml"), fxa); err != nil {
 		return err
 	}

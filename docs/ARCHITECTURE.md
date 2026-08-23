@@ -4,7 +4,7 @@
 
 ## Packages
 
-- `cmd/opsgraph` — cobra CLI (`ask`, `prove`, `pack`, fleet helpers, `demo`, `test`, `status`, …).
+- `cmd/opsgraph` — cobra CLI (`ask`, `open`, `receipt`, `delta`, `prove`, `pack`, fleet helpers, `demo`, `test`, `status`, …).
 - `internal/model` — shared domain types (`AskResult`, services, alerts, evidence).
 - `internal/config` — `.opsgraph.yaml` loader with defaults.
 - `internal/store` — pure-Go SQLite (`modernc.org/sqlite`), opened with `_defensive=1`; `PRAGMA user_version` gated (current schema v2; v1→v2 adds alert/change indexes).
@@ -54,3 +54,5 @@ is merged when present.
 `opsgraph pack` serializes the current store into a fixture directory (`meta.yaml` + entities + reconstructed k8s + runbooks + `expected/*.json`) and immediately re-ingests it to prove bit-identical `ask`/`verify` JSON. `--out incident.opsgraph` wraps that directory in a stdlib zip with sorted names and a fixed mtime so the SHA-256 is stable across OS. Email the folder or the one file; `opsgraph test` / `opsgraph ask --fixture` work on either.
 
 `opsgraph prove` is the zero-setup validator: embedded checkout → pack → replay dir → zip → replay zip. Same evidence IDs, same JSON, no cluster, no account.
+
+`opsgraph incident.opsgraph` opens a pack (hottest service). `opsgraph receipt` is the pasteable ID list. `opsgraph delta a b` diffs two packs by evidence ID set — the offline org workflow (morning vs now) that live-cluster LLM tools do not ship.

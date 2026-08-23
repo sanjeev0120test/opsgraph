@@ -52,6 +52,7 @@ func main() {
 	// unset. Wire stdout explicitly so redirects and CI smoke captures work.
 	root.SetOut(os.Stdout)
 	root.SetErr(os.Stderr)
+	root.SetArgs(rewriteRootArgs(root, os.Args[1:]))
 	err := root.ExecuteContext(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "opsgraph:", err)

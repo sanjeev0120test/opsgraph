@@ -32,13 +32,13 @@ type fxServices struct {
 }
 
 type fxService struct {
-	ID      string            `yaml:"id"`
-	Name    string            `yaml:"name"`
-	Aliases []string          `yaml:"aliases"`
-	OwnerID string            `yaml:"owner_id"`
-	Health  string            `yaml:"health"`
-	Labels  map[string]string `yaml:"labels"`
-	Sources []string          `yaml:"sources"`
+	ID      string        `yaml:"id"`
+	Name    string        `yaml:"name"`
+	Aliases []string      `yaml:"aliases"`
+	OwnerID string        `yaml:"owner_id"`
+	Health  string        `yaml:"health"`
+	Labels  yamlStringMap `yaml:"labels"`
+	Sources []string      `yaml:"sources"`
 }
 
 type fxOwners struct {
@@ -131,7 +131,7 @@ func ingestServices(s *store.Store, fsys fs.FS) error {
 		}
 		if err := s.UpsertService(model.Service{
 			ID: v.ID, Name: v.Name, Aliases: v.Aliases, OwnerID: v.OwnerID,
-			Health: health, Labels: v.Labels, Sources: v.Sources,
+			Health: health, Labels: map[string]string(v.Labels), Sources: v.Sources,
 		}); err != nil {
 			return err
 		}

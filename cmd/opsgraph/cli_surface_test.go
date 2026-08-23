@@ -13,9 +13,9 @@ func TestCLICommandSurfaceFrozen(t *testing.T) {
 	root := newRootCmd()
 	got := commandNames(root)
 	want := []string{
-		"alerts", "ask", "blast", "changes", "compare", "completion", "demo",
+		"alerts", "ask", "blast", "changes", "compare", "completion", "delta", "demo",
 		"doctor", "evidence", "explain", "export", "fingerprint", "graph",
-		"handoff", "health", "impact", "ingest", "init", "owners", "pack", "path", "prove", "report",
+		"handoff", "health", "impact", "ingest", "init", "open", "owners", "pack", "path", "prove", "receipt", "report",
 		"resolve", "score", "services", "status", "test", "timeline", "top",
 		"validate-fixture", "verify-runbook", "version", "watch", "who", "why",
 	}
@@ -27,14 +27,17 @@ func TestCLICommandSurfaceFrozen(t *testing.T) {
 func TestCLICriticalFlagsFrozen(t *testing.T) {
 	root := newRootCmd()
 	cases := map[string][]string{
-		"ask":    {"ai", "config", "data-dir", "fixture", "format", "since"},
-		"watch":  {"config", "data-dir", "fixture", "format", "interval", "once", "timeout"},
-		"export": {"config", "data-dir", "fixture", "format", "meta", "out"},
-		"health": {"config", "data-dir", "fixture", "format", "strict"},
-		"ingest": {"config", "data-dir", "fixture", "format", "merge", "replace"},
-		"init":   {"force", "git", "k8s", "out"},
-		"pack":   {"config", "data-dir", "fixture", "force", "format", "out", "since"},
-		"prove":  {"format"},
+		"ask":     {"ai", "config", "data-dir", "fixture", "format", "since"},
+		"watch":   {"config", "data-dir", "fixture", "format", "interval", "once", "timeout"},
+		"export":  {"config", "data-dir", "fixture", "format", "meta", "out"},
+		"health":  {"config", "data-dir", "fixture", "format", "strict"},
+		"ingest":  {"config", "data-dir", "fixture", "format", "merge", "replace"},
+		"init":    {"force", "git", "k8s", "out"},
+		"pack":    {"config", "data-dir", "fixture", "force", "format", "out", "since"},
+		"prove":   {"format"},
+		"open":    {"format"},
+		"receipt": {"config", "data-dir", "fixture", "format", "since"},
+		"delta":   {"format"},
 	}
 	for name, want := range cases {
 		cmd, _, err := root.Find([]string{name})
