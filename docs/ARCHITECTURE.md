@@ -7,7 +7,7 @@
 - `cmd/opsgraph` — cobra CLI (`ask`, fleet helpers, `demo`, `test`, `status`, …).
 - `internal/model` — shared domain types (`AskResult`, services, alerts, evidence).
 - `internal/config` — `.opsgraph.yaml` loader with defaults.
-- `internal/store` — pure-Go SQLite (`modernc.org/sqlite`), `PRAGMA user_version` gated (current schema v2; v1→v2 adds alert/change indexes).
+- `internal/store` — pure-Go SQLite (`modernc.org/sqlite`), opened with `_defensive=1`; `PRAGMA user_version` gated (current schema v2; v1→v2 adds alert/change indexes).
 - `internal/ingest` — fixtures, git, k8s snapshot, optional Prometheus/Alertmanager/Helm.
 - `internal/ask` — blast radius, timeline, recommendations R1–R6.
 - `internal/runbook` — Markdown parse + check catalog (`opsgraph:check=`).

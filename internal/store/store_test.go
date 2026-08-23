@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +114,33 @@ func TestSchemaUserVersion(t *testing.T) {
 	}
 	if s.Path() == "" {
 		t.Fatal("Path() empty")
+	}
+	if strings.Contains(s.Path(), "?") {
+		t.Fatalf("Path must stay a filesystem path, got %q", s.Path())
+	}
+}
+
+func TestOpenUsesDefensiveMode(t *testing.T) {
+	s := newTestStore(t)
+	var before, after int64
+	if err := s.db.QueryRow(`PRAGMA schema_version`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`PRAGMA schema_version=999`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`PRAGMA schema_version`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("schema_version changed %d -> %d; _defensive=1 should no-op that write", before, after)
+	}
+	ver, err := s.UserVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ver != SchemaVersion {
+		t.Fatalf("user_version=%d want %d (migrations must still work under defensive)", ver, SchemaVersion)
 	}
 }
 

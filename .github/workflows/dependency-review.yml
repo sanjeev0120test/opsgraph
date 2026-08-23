@@ -34,9 +34,10 @@ jobs:
             MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, 0BSD,
             Unlicense, CC0-1.0, BlueOak-1.0.0, PostgreSQL, Zlib, BSL-1.0,
             LicenseRef-scancode-google-patent-license-golang
-          # GitHub's license graph lags new Go module versions. These are
-          # BSD-3-Clause (modernc) / MIT (go-isatty); verified from upstream.
+          # GitHub's license graph lags new Go module versions. Wildcard so a
+          # patch bump does not fail CI before the catalog indexes the tag.
+          # Licenses verified from upstream: BSD-3-Clause (modernc) / MIT (go-isatty).
           allow-dependencies-licenses: >
-            pkg:golang/modernc.org/sqlite@1.57.0,
-            pkg:golang/modernc.org/libc@1.74.4,
-            pkg:golang/github.com/mattn/go-isatty@0.0.24
+            pkg:golang/modernc.org/sqlite@*,
+            pkg:golang/modernc.org/libc@*,
+            pkg:golang/github.com/mattn/go-isatty@*
