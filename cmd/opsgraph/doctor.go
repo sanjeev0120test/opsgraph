@@ -88,7 +88,10 @@ func newDoctorCmd() *cobra.Command {
 			check("config_load", err == nil, errOrOK(err))
 			if err == nil {
 				if cfgPath == "" && resolveConfigPath("") == "" {
-					warnf("config_file", "no .opsgraph.yaml (using built-in defaults)")
+					if _, _, ok := detectCwdSource(); ok {
+						check("cwd_source", true, "k8s dump or git layout in cwd (`opsgraph ask` works without a config file)")
+					}
+					warnf("config_file", "no .opsgraph.yaml (using built-in defaults; run `opsgraph init` to write one)")
 				} else if eff := resolveConfigPath(cfgPath); eff != "" {
 					check("config_file", true, eff)
 				}

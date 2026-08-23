@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sanjeev0120test/opsgraph/internal/ask"
+	"github.com/sanjeev0120test/opsgraph/internal/ingest"
 	"github.com/sanjeev0120test/opsgraph/internal/output"
 	"github.com/sanjeev0120test/opsgraph/internal/runbook"
 	"github.com/spf13/cobra"
@@ -17,7 +18,7 @@ func newTestCmd() *cobra.Command {
 	var update bool
 	var format string
 	cmd := &cobra.Command{
-		Use:   "test <fixture-dir>",
+		Use:   "test <fixture>",
 		Short: "Run a fixture pack and compare output against its golden files",
 		Long: "Ingests a fixture pack, then for every service that has a runbook it\n" +
 			"generates ask_<svc>.json and verify_<svc>.json and compares them against\n" +
@@ -36,12 +37,19 @@ func newTestCmd() *cobra.Command {
 				return fail(2, "%v", err)
 			}
 			defer ls.cleanup()
+			root := ls.root
+			if root == "" {
+				root = dir
+			}
+			if ingest.IsPackArchive(dir) && update {
+				return fail(2, "cannot --update goldens inside a pack archive; unpack it first")
+			}
 
 			services, err := ls.store.ListServices()
 			if err != nil {
 				return fail(2, "%v", err)
 			}
-			expectedDir := filepath.Join(dir, "expected")
+			expectedDir := filepath.Join(root, "expected")
 			if update {
 				if err := os.MkdirAll(expectedDir, 0o755); err != nil {
 					return fail(2, "%v", err)

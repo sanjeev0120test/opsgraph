@@ -1,4 +1,5 @@
 # Example standalone service map you can adapt for a real environment.
+# Optional: `opsgraph init --k8s <kubectl dump>` is enough for ask without this catalog.
 # Point `opsgraph ask --config` (or ingest/status) at a full .opsgraph.yaml;
 # this file is a reference for how to describe services, owners, and dependencies.
 version: 1

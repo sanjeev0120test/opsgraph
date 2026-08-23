@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,5 +72,71 @@ func TestIngestGit(t *testing.T) {
 	}
 	if c.EvidenceID == "" {
 		t.Fatal("commit change should reference evidence")
+	}
+}
+
+func TestIngestGitDiscoversWithoutCatalog(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	abs := filepath.Join(dir, "services", "payments", "main.go")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Add("services/payments/main.go"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wt.Commit("fix payments timeout", &git.CommitOptions{
+		Author: &object.Signature{Name: "Dev", Email: "dev@example.com", When: now.Add(-5 * time.Minute)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if err := ingest.IngestGit(s, dir, nil, now.Add(-time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := s.GetService("payments")
+	if err != nil {
+		t.Fatalf("discovered service: %v", err)
+	}
+	if svc.Health != "unknown" {
+		t.Fatalf("health=%q", svc.Health)
+	}
+	changes, err := s.ListChanges("payments", now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Summary != "fix payments timeout" {
+		t.Fatalf("changes: %+v", changes)
+	}
+}
+
+func TestDefaultGitPaths(t *testing.T) {
+	got := ingest.DefaultGitPaths("checkout")
+	joined := strings.Join(got, ",")
+	for _, want := range []string{"services/checkout", "apps/checkout", "checkout"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in %v", want, got)
+		}
+	}
+	for _, p := range ingest.DefaultGitPaths("docs") {
+		if p == "docs" {
+			t.Fatalf("reserved name leaked bare path: %v", ingest.DefaultGitPaths("docs"))
+		}
 	}
 }

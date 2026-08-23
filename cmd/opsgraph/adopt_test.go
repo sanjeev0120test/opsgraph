@@ -1,0 +1,189 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/sanjeev0120test/opsgraph/internal/config"
+)
+
+func TestAskHottestSelectsCheckout(t *testing.T) {
+	fx := fixtureDir(t)
+	out, errOut, code := runRoot(t, "ask", "--fixture", fx, "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(errOut, "auto-selected hottest service: checkout") {
+		t.Fatalf("stderr missing auto-select:\n%s", errOut)
+	}
+	var payload struct {
+		Service struct {
+			ID string `json:"id"`
+		} `json:"service"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if payload.Service.ID != "checkout" {
+		t.Fatalf("hottest = %q, want checkout", payload.Service.ID)
+	}
+}
+
+func TestInitWritesConfig(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, ".opsgraph.yaml")
+	snap := filepath.Join(dir, "k8s-snapshot.yaml")
+	stdout, stderr, code := runRoot(t, "init", "--out", out, "--k8s", snap, "--git", ".")
+	if code != 0 {
+		t.Fatalf("init exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if !strings.Contains(stdout, "wrote") {
+		t.Fatalf("stdout=%s", stdout)
+	}
+	cfg, err := config.Load(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Connectors.Kubernetes.Enabled || cfg.Connectors.Kubernetes.Snapshot != snap {
+		t.Fatalf("k8s connector: %+v", cfg.Connectors.Kubernetes)
+	}
+	if !cfg.Connectors.Git.Enabled || cfg.Connectors.Git.RepoPath != "." {
+		t.Fatalf("git connector: %+v", cfg.Connectors.Git)
+	}
+	_, _, code = runRoot(t, "init", "--out", out, "--k8s", snap)
+	if code != 1 {
+		t.Fatalf("overwrite without --force exit=%d, want 1", code)
+	}
+	_, _, code = runRoot(t, "init", "--out", out, "--k8s", snap, "--force")
+	if code != 0 {
+		t.Fatalf("force overwrite exit=%d", code)
+	}
+}
+
+func TestAskNativeKubectlSnapshot(t *testing.T) {
+	snap := filepath.Join(repoRoot(t), "internal", "ingest", "testdata", "kubectl-list.yaml")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".opsgraph.yaml")
+	body := "version: 1\nconnectors:\n  git:\n    enabled: false\n  kubernetes:\n    enabled: true\n    snapshot: " +
+		strconvQuoteForTest(snap) + "\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := runRoot(t, "ask", "checkout", "--config", cfgPath, "--format", "json")
+	if code != 0 {
+		t.Fatalf("ask checkout native exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"id": "checkout"`) {
+		t.Fatalf("missing checkout:\n%s", out)
+	}
+	if !strings.Contains(out, `"health": "degraded"`) {
+		t.Fatalf("checkout should be degraded from native readyReplicas:\n%s", out)
+	}
+}
+
+func strconvQuoteForTest(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func TestAskAutoDetectsCwdSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(repoRoot(t), "internal", "ingest", "testdata", "kubectl-list.yaml")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "k8s-snapshot.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("OPSGRAPH_FIXTURE", "")
+	t.Setenv("OPSGRAPH_CONFIG", "")
+	t.Setenv("OPSGRAPH_DATA_DIR", "")
+	out, errOut, code := runRoot(t, "ask", "checkout", "--format", "json")
+	if code != 0 {
+		t.Fatalf("cwd snapshot ask exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"health": "degraded"`) {
+		t.Fatalf("expected degraded checkout:\n%s", out)
+	}
+}
+
+func TestPackArchiveThenTest(t *testing.T) {
+	fx := fixtureDir(t)
+	zipPath := filepath.Join(t.TempDir(), "incident.opsgraph")
+	_, errOut, code := runRoot(t, "pack", "--fixture", fx, "--out", zipPath, "--format", "json")
+	if code != 0 {
+		t.Fatalf("pack zip exit=%d stderr=%s", code, errOut)
+	}
+	_, errOut, code = runRoot(t, "test", zipPath)
+	if code != 0 {
+		t.Fatalf("test zip exit=%d stderr=%s", code, errOut)
+	}
+	out, errOut, code := runRoot(t, "ask", "--fixture", zipPath, "--format", "json")
+	if code != 0 {
+		t.Fatalf("ask zip exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"id": "checkout"`) {
+		t.Fatalf("ask zip missing checkout:\n%s", out)
+	}
+}
+
+func TestProveJSON(t *testing.T) {
+	out, errOut, code := runRoot(t, "prove", "--format", "json")
+	if code != 0 {
+		t.Fatalf("prove exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload struct {
+		OK         bool   `json:"ok"`
+		PackReplay bool   `json:"pack_replay"`
+		ZipReplay  bool   `json:"zip_replay"`
+		SHA256     string `json:"sha256"`
+		Service    string `json:"service"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if !payload.OK || !payload.PackReplay || !payload.ZipReplay {
+		t.Fatalf("prove envelope: %+v", payload)
+	}
+	if payload.Service != "checkout" {
+		t.Fatalf("service=%q", payload.Service)
+	}
+	if len(payload.SHA256) != 64 {
+		t.Fatalf("sha256=%q", payload.SHA256)
+	}
+}
+
+func TestRootStartHere(t *testing.T) {
+	out, errOut, code := runRoot(t)
+	if code != 0 {
+		t.Fatalf("root exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	for _, want := range []string{"opsgraph prove", "opsgraph ask", "opsgraph pack", "incident.opsgraph"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("start-here missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPackDefaultOut(t *testing.T) {
+	fx := fixtureDir(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	_, errOut, code := runRoot(t, "pack", "--fixture", fx, "--format", "json")
+	if code != 0 {
+		t.Fatalf("pack default out exit=%d stderr=%s", code, errOut)
+	}
+	zipPath := filepath.Join(dir, "incident.opsgraph")
+	if _, err := os.Stat(zipPath); err != nil {
+		t.Fatalf("expected default pack: %v", err)
+	}
+	_, errOut, code = runRoot(t, "test", zipPath)
+	if code != 0 {
+		t.Fatalf("test default pack exit=%d stderr=%s", code, errOut)
+	}
+}

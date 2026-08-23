@@ -19,8 +19,9 @@ import (
 )
 
 // openK8sSnapshotFS accepts either a directory (deployments.yaml inside) or a
-// path to the deployments YAML file (siblings: events.yaml, releases.yaml).
-// File names returned for fs.FS always use forward slashes (required by io/fs).
+// path to a YAML file (kubectl List/Deployment dump or opsgraph dialect).
+// A native List file also contributes Events; sibling events.yaml is merged
+// when present. File names returned for fs.FS always use forward slashes.
 func openK8sSnapshotFS(snap string) (fsys fs.FS, depFile, evFile, relFile string, err error) {
 	info, err := os.Stat(snap)
 	if err != nil {
@@ -42,24 +43,6 @@ func LiveIngest(ctx context.Context, s *store.Store, cfg *config.Config, configD
 	}
 	if err := seedFromConfig(s, cfg, configDir); err != nil {
 		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if cfg.Connectors.Git.Enabled {
-		repoPath := cfg.Connectors.Git.RepoPath
-		if repoPath == "" {
-			repoPath = "."
-		}
-		if !filepath.IsAbs(repoPath) {
-			repoPath = filepath.Join(configDir, repoPath)
-		}
-		if err := IngestGit(s, repoPath, servicePaths(cfg), since, now); err != nil {
-			// No repo / empty history is non-fatal — fixtures and other sources still work.
-			if !isMissingGit(err) {
-				return fmt.Errorf("git connector: %w", err)
-			}
-		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -117,7 +100,80 @@ func LiveIngest(ctx context.Context, s *store.Store, cfg *config.Config, configD
 			}
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cfg.Connectors.Git.Enabled {
+		if err := ingestGitAndRunbooks(s, cfg, configDir, since, now); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func ingestGitAndRunbooks(s *store.Store, cfg *config.Config, configDir string, since, now time.Time) error {
+	repoPath := cfg.Connectors.Git.RepoPath
+	if repoPath == "" {
+		repoPath = "."
+	}
+	if !filepath.IsAbs(repoPath) {
+		repoPath = filepath.Join(configDir, repoPath)
+	}
+	targets, err := gitTargets(s, cfg)
+	if err != nil {
+		return err
+	}
+	if err := IngestGit(s, repoPath, targets, since, now); err != nil {
+		if !isMissingGit(err) {
+			return fmt.Errorf("git connector: %w", err)
+		}
+		return nil
+	}
+	svcs, err := s.ListServices()
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(svcs))
+	for _, svc := range svcs {
+		ids = append(ids, svc.ID)
+	}
+	sort.Strings(ids)
+	if err := DiscoverRunbooks(s, repoPath, ids); err != nil {
+		return fmt.Errorf("discover runbooks: %w", err)
+	}
+	return nil
+}
+
+func gitTargets(s *store.Store, cfg *config.Config) ([]ServicePaths, error) {
+	byID := map[string]ServicePaths{}
+	for _, sp := range servicePaths(cfg) {
+		byID[sp.ServiceID] = sp
+	}
+	svcs, err := s.ListServices()
+	if err != nil {
+		return nil, err
+	}
+	for _, svc := range svcs {
+		sp := byID[svc.ID]
+		sp.ServiceID = svc.ID
+		sp.Paths = append(sp.Paths, DefaultGitPaths(svc.ID)...)
+		for _, a := range svc.Aliases {
+			sp.Paths = append(sp.Paths, DefaultGitPaths(a)...)
+		}
+		byID[svc.ID] = sp
+	}
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]ServicePaths, 0, len(ids))
+	for _, id := range ids {
+		sp := byID[id]
+		sp.Paths = uniqueGitPaths(sp.Paths)
+		out = append(out, sp)
+	}
+	return out, nil
 }
 
 func isMissingGit(err error) bool {
@@ -204,7 +260,7 @@ func seedRunbook(s *store.Store, rbPath, configDir string) error {
 		}
 		return fmt.Errorf("read runbook %q: %w", p, err)
 	}
-	rb, _, err := runbook.Parse(data, filepath.ToSlash(rbPath))
+	rb, _, err := runbook.ParseWithInfer(data, filepath.ToSlash(rbPath))
 	if err != nil {
 		return err
 	}

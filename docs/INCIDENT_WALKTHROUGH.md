@@ -12,6 +12,7 @@ checkout.
 ## Reproduce
 
 ```bash
+opsgraph prove
 opsgraph demo
 ```
 

@@ -23,16 +23,26 @@ func newAskCmd() *cobra.Command {
 		useAI      bool
 	)
 	cmd := &cobra.Command{
-		Use:   "ask <service>",
+		Use:   "ask [service]",
 		Short: "Show evidence-backed incident context for a service",
-		Example: `  opsgraph ask checkout --fixture fixtures/incident_checkout
+		Long: "ask prints timeline, blast radius, owner, and runbook validity.\n" +
+			"Omit the service name to auto-select the hottest service by severity score.\n" +
+			"With no flags, a k8s-snapshot.yaml (or services/ / apps/ git layout) in cwd is enough.",
+		Example: `  opsgraph ask
+  opsgraph ask checkout --fixture fixtures/incident_checkout
+  opsgraph ask --fixture fixtures/incident_checkout
+  opsgraph ask --fixture incident.opsgraph
   opsgraph ask checkout --format json --ai
-  opsgraph ask checkout --data-dir .opsgraph/data`,
-		Args:              cobra.ExactArgs(1),
+  opsgraph ask --data-dir .opsgraph/data`,
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeServiceArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireArg("service", args[0]); err != nil {
-				return err
+			service := ""
+			if len(args) == 1 {
+				if err := requireArg("service", args[0]); err != nil {
+					return err
+				}
+				service = args[0]
 			}
 			if err := validFormat(format); err != nil {
 				return fail(2, "%v", err)
@@ -62,7 +72,15 @@ func newAskCmd() *cobra.Command {
 				return fail(2, "%v", err)
 			}
 			defer ls.cleanup()
-			res, err := ask.Ask(ls.store, args[0], ask.Options{Since: since, Now: ls.now, WithRunbook: withRB})
+			if service == "" {
+				picked, sc, err := pickHottestService(ls, since)
+				if err != nil {
+					return fail(1, "%v", err)
+				}
+				service = picked
+				cmd.PrintErrf("auto-selected hottest service: %s (score %d)\n", service, sc)
+			}
+			res, err := ask.Ask(ls.store, service, ask.Options{Since: since, Now: ls.now, WithRunbook: withRB})
 			if err != nil {
 				if errors.Is(err, ask.ErrServiceNotFound) || errors.Is(err, store.ErrAmbiguous) {
 					return fail(1, "%v", err)

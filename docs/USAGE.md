@@ -6,9 +6,11 @@
 go build -o bin/opsgraph ./cmd/opsgraph   # or: make build
 ```
 
+`opsgraph` with no args prints a four-step start-here (prove → dump → ask → pack). Full help: `opsgraph --help`.
+
 Most inspection commands accept `--format table|json` (default `table`).
 Exceptions: `graph` (`ascii|table|mermaid|json`), `export`/`report` (`json|markdown`), `watch` (`--once` supports `--format json`).
-`status` / `doctor` / `ingest` / `version` / `validate-fixture` / `test` / `why` / `handoff` / `explain` / `evidence` accept `--format json`.
+`status` / `doctor` / `ingest` / `pack` / `prove` / `version` / `validate-fixture` / `test` / `why` / `handoff` / `explain` / `evidence` accept `--format json`.
 `health --strict` exits `1` when any service is degraded, unhealthy, or unknown (fail-closed); JSON includes `"ok": true|false`.
 Healthy-path CI pack: `fixtures/fleet_healthy` (all services healthy; use with `health --strict`).
 `status` JSON includes `"ok"` / `"has_data"`; `path` JSON includes `"ok"` / `"found"` (missing routes still exit `1` with a JSON envelope).
@@ -18,7 +20,7 @@ List commands treat `--limit 0` as unlimited (`changes`/`top`/`alerts`/`timeline
 Environment defaults (flags win when set):
 - `OPSGRAPH_CONFIG` — path to `.opsgraph.yaml`
 - `OPSGRAPH_DATA_DIR` — persistent store directory
-- `OPSGRAPH_FIXTURE` — fixture pack directory
+- `OPSGRAPH_FIXTURE` — fixture pack directory or `.zip` / `.opsgraph` archive
 
 ## Core commands
 
@@ -31,18 +33,25 @@ opsgraph demo --format json
 opsgraph demo --ai            # local AI summary (offline fallback if Ollama absent)
 ```
 
-### `opsgraph ask <service>`
-Evidence-backed context for a service.
+### `opsgraph ask [service]`
+Evidence-backed context for a service. Omit the name to auto-select the
+hottest service by severity score (stderr prints what was picked so JSON
+stdout stays pipe-clean).
 
 ```bash
 # From a fixture pack (deterministic, offline):
 opsgraph ask checkout --fixture fixtures/incident_checkout
+opsgraph ask --fixture fixtures/incident_checkout
+
+# CWD dump, no flags, no catalog:
+kubectl get deploy,event -o yaml > k8s-snapshot.yaml
+opsgraph ask
 
 # From a persistent store (explicit; no live re-scrape):
 opsgraph ask checkout --data-dir .opsgraph/data
 
 # Live k8s/prom/AM connectors from .opsgraph.yaml (preferred over stale state.db):
-opsgraph ask checkout --since 90m
+opsgraph ask --since 90m
 opsgraph ask checkout --format json --ai
 ```
 
@@ -58,6 +67,47 @@ Notes:
 Exit codes: `0` success, `1` service not found / empty store, `2` usage/config error.
 
 Other exits: `status` with no data → `1`; `watch` timeout → `1` (bad config → `2`); `top` exits `1` only when every service fails to score.
+
+### `opsgraph init`
+Write `.opsgraph.yaml` for this repo. No service catalog required.
+
+```bash
+kubectl get deploy,event -o yaml > k8s-snapshot.yaml
+opsgraph init --k8s k8s-snapshot.yaml
+opsgraph ask
+```
+
+`--k8s` accepts a directory (`deployments.yaml` + optional `events.yaml`) or a
+single kubectl YAML file (`kind: List` / `Deployment` / `Event`). `--force`
+overwrites an existing config. `--git` defaults to `.`.
+
+### `opsgraph prove`
+One-command offline proof. Ingests the built-in incident, writes a pack, replays
+the directory and a `.opsgraph` zip, and prints a SHA-256. No cluster, no
+account. Anyone can run this and get the same evidence IDs + JSON.
+
+```bash
+opsgraph prove
+opsgraph prove --format json
+```
+
+### `opsgraph pack`
+Write a portable incident pack (fixture + goldens) from the current source.
+Anyone can replay it with no cluster and get the same JSON.
+
+```bash
+opsgraph pack                      # writes ./incident.opsgraph
+opsgraph pack --out ./incident
+opsgraph pack --out ./incident.opsgraph    # single emailable file
+opsgraph pack --fixture fixtures/incident_checkout --out ./incident
+opsgraph test ./incident
+opsgraph test ./incident.opsgraph
+opsgraph ask --fixture ./incident.opsgraph
+```
+
+Default `--out` is `incident.opsgraph`. `--force` overwrites an existing pack (`meta.yaml` present or empty dir) or an
+existing `.zip`/`.opsgraph`. Pack always self-checks replay before exiting 0.
+Archive bytes are sorted + fixed-mtime so the SHA-256 is stable across OS.
 
 ### `opsgraph ingest`
 Load a fixture pack (or live config sources) into a persistent data dir.
@@ -90,16 +140,18 @@ opsgraph why checkout --fixture fixtures/incident_checkout --format json
 opsgraph explain checkout --fixture fixtures/incident_checkout --format json
 ```
 
-### `opsgraph test <fixture-dir>`
+### `opsgraph test <fixture>`
 Compares `ask`/`verify` output against the pack's `expected/*.json` goldens.
+`<fixture>` may be a directory or a `.zip`/`.opsgraph` archive.
 
 ```bash
 opsgraph test ./fixtures/incident_checkout
+opsgraph test ./incident.opsgraph
 opsgraph test ./fixtures/incident_checkout --update
 ```
 
 ### `opsgraph status` / `opsgraph doctor` / `opsgraph version`
-Store counts, environment checks, and build metadata. `status` uses the same source selection as `ask`, prints `ACTIVE SOURCE` (`fixture|live|persisted`), and probes Prometheus/Alertmanager/Ollama when configured. `doctor` verifies git, kubernetes snapshot (when enabled), opens `--data-dir` schema, and probes Prom/AM endpoints (unreachable enabled URLs fail the doctor run).
+Store counts, environment checks, and build metadata. `status` uses the same source selection as `ask`, prints `ACTIVE SOURCE` (`fixture|live|persisted`), and probes Prometheus/Alertmanager/Ollama when configured. `doctor` verifies git, kubernetes snapshot (when enabled), opens `--data-dir` schema, probes Prom/AM endpoints (unreachable enabled URLs fail the doctor run), notes a cwd dump/layout when present, and hints `opsgraph init` when no config file is present. `opsgraph prove` is the zero-setup validator.
 
 ### `opsgraph alerts`
 Fleet alert list. `--firing` keeps active (`firing`/`pending`) alerts; `--service <name>` filters by service; `--since` trims resolved/historical rows while live and `suppressed` alerts stay visible.
@@ -116,7 +168,7 @@ Fleet alert list. `--firing` keeps active (`firing`/`pending`) alerts; `--servic
 | `path`, `graph`, `compare`, `who`, `resolve` | Topology / ownership |
 | `report`, `export`, `handoff` | Markdown/JSON/text handoff |
 | `watch` | Poll until healthy (default interval 5s; live/persistent sources) |
-| `validate-fixture`, `completion` | Pack checks / shell completion |
+| `validate-fixture`, `completion`, `init`, `pack`, `prove` | Pack checks / completion / starter config / shareable incident / offline proof |
 
 ## Validation
 
@@ -128,7 +180,7 @@ Fleet alert list. `--firing` keeps active (`firing`/`pending`) alerts; `--servic
 In `.opsgraph.yaml` (see `.opsgraph.example.yaml`):
 
 - `connectors.git` — local repo scan
-- `connectors.kubernetes.snapshot` — `deployments.yaml` / `events.yaml` / optional Helm `releases.yaml`
+- `connectors.kubernetes.snapshot` — directory or file. Accepts native `kubectl get -o yaml` (`kind: List` / `Deployment` / `Event`) and the opsgraph dialect (`deployments:` / `events:`). Optional Helm `releases.yaml`.
 - `connectors.prometheus` / `connectors.alertmanager` — disabled by default
 
 Optional cluster demo: `bash hack/kind-demo.sh`.

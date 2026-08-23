@@ -17,7 +17,15 @@ aliases: [checkout-api]
 ## Checks
 
 Annotate steps with `opsgraph:check=…`. A check
-binds to the nearest preceding numbered step.
+binds to the nearest preceding numbered step. Annotations always win.
+
+Unmarked steps are inferred from wording (so existing Markdown runbooks still
+verify something useful):
+
+- deploy / rollout / release → `deploy_age_lt:60m`
+- unhealthy / not healthy / still down → `service_unhealthy:<service>`
+- healthy / healthz / recover → `service_healthy:<service>`
+- otherwise → `manual`
 
 ```markdown
 1. Confirm a recent deploy.

@@ -29,7 +29,7 @@ func ingestRunbooks(s *store.Store, fsys fs.FS) error {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", name, err)
 		}
-		rb, _, err := runbook.Parse(data, name)
+		rb, _, err := runbook.ParseWithInfer(data, name)
 		if err != nil {
 			return err
 		}

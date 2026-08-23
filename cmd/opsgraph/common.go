@@ -33,20 +33,31 @@ type loadedStore struct {
 	now     time.Time
 	cleanup func()
 	source  string
+	root    string // materialized fixture directory (for expected/ goldens)
 }
 
-// storeFromFixtureDir ingests an on-disk fixture pack into an ephemeral store.
-func storeFromFixtureDir(dir string) (*loadedStore, error) {
+// storeFromFixtureDir ingests an on-disk fixture pack (directory or .zip/.opsgraph)
+// into an ephemeral store.
+func storeFromFixtureDir(path string) (*loadedStore, error) {
+	dir, extra, err := ingest.MaterializeFixture(path)
+	if err != nil {
+		return nil, err
+	}
 	s, cleanup, err := store.OpenTemp()
 	if err != nil {
+		extra()
 		return nil, err
 	}
 	now, err := ingest.IngestFixtureDir(s, dir)
 	if err != nil {
 		cleanup()
+		extra()
 		return nil, err
 	}
-	return &loadedStore{store: s, now: now, cleanup: cleanup, source: "fixture"}, nil
+	return &loadedStore{
+		store: s, now: now, source: "fixture", root: dir,
+		cleanup: func() { cleanup(); extra() },
+	}, nil
 }
 
 // storeFromFixtureFS ingests a fixture pack filesystem (e.g. embedded) into an
@@ -248,7 +259,21 @@ func loadAskStore(ctx context.Context, fixture, configPath, dataDirFlag string, 
 		return nil, fmt.Errorf("%w at %s: run `opsgraph ingest` first or pass `--fixture`", ErrEmptyStore, dir)
 	}
 	if effPath == "" {
-		return nil, fmt.Errorf("%w: pass --fixture <pack>, run `opsgraph ingest`, or add a .opsgraph.yaml", ErrNoDataSource)
+		if auto, autoDir, ok := detectCwdSource(); ok {
+			ls, err := storeFromConfig(ctx, auto, autoDir, since, time.Now().UTC())
+			if err == nil {
+				counts, cerr := ls.store.Counts()
+				if cerr != nil {
+					ls.cleanup()
+					return nil, cerr
+				}
+				if counts["services"] > 0 {
+					return ls, nil
+				}
+				ls.cleanup()
+			}
+		}
+		return nil, fmt.Errorf("%w: pass --fixture <pack>, drop a k8s-snapshot.yaml here, run `opsgraph ingest`, or add a .opsgraph.yaml", ErrNoDataSource)
 	}
 	ls, err := storeFromConfig(ctx, cfg, configDir, since, time.Now().UTC())
 	if err != nil {

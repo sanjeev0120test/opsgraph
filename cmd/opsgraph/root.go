@@ -11,10 +11,17 @@ func newRootCmd() *cobra.Command {
 		Short: "Evidence-backed incident context for on-call engineers",
 		Long: "opsgraph gathers what changed, what's affected, who owns it, and whether the\n" +
 			"runbook is still valid - from local git, a Kubernetes snapshot, and fixtures.\n" +
-			"It is free, offline-first, and needs no accounts or secrets.",
+			"It is free, offline-first, and needs no accounts or secrets.\n\n" +
+			"Unique property: the same evidence IDs and JSON on any OS, with no SaaS or LLM.\n" +
+			"Validate with: opsgraph prove",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version.String(),
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			printStartHere(cmd)
+			return nil
+		},
 	}
 	root.AddGroup(&cobra.Group{ID: "core", Title: "Core Incident Commands"})
 	root.AddGroup(&cobra.Group{ID: "fleet", Title: "Fleet & Topology"})
@@ -41,8 +48,21 @@ func newRootCmd() *cobra.Command {
 		newChangesCmd(), newAlertsCmd(), newTimelineCmd(), newEvidenceCmd(),
 	)
 	add("ops",
-		newDemoCmd(), newIngestCmd(), newStatusCmd(), newDoctorCmd(),
+		newDemoCmd(), newProveCmd(), newIngestCmd(), newInitCmd(), newPackCmd(), newStatusCmd(), newDoctorCmd(),
 		newTestCmd(), newValidateFixtureCmd(), newCompletionCmd(), newVersionCmd(),
 	)
 	return root
+}
+
+func printStartHere(cmd *cobra.Command) {
+	cmd.Print(`opsgraph — portable incident evidence (offline, no account)
+
+  1. Prove it   opsgraph prove
+  2. Dump k8s   kubectl get deploy,event -o yaml > k8s-snapshot.yaml
+  3. Ask        opsgraph ask
+  4. Share      opsgraph pack
+                → incident.opsgraph  (email it; same JSON on any OS)
+
+More: opsgraph --help   ·   docs: https://github.com/sanjeev0120test/opsgraph
+`)
 }

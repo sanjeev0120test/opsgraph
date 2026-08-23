@@ -8,7 +8,7 @@ and `opsgraph ask --fixture <pack>`.
 
 - `services.yaml`, `owners.yaml`, `dependencies.yaml`
 - `changes.yaml`, `alerts.yaml`
-- `k8s/deployments.yaml`, `k8s/events.yaml` (optional)
+- `k8s/deployments.yaml`, `k8s/events.yaml` (optional; opsgraph dialect **or** native `kubectl get -o yaml`)
 - `runbooks/*.md`
 - `meta.yaml` (`now:` fixture clock)
 - `expected/*.json` goldens for `opsgraph test`

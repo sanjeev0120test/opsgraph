@@ -18,7 +18,7 @@ import (
 func newValidateFixtureCmd() *cobra.Command {
 	var format string
 	cmd := &cobra.Command{
-		Use:   "validate-fixture <dir>",
+		Use:   "validate-fixture <fixture>",
 		Short: "Validate a fixture pack can be ingested and has required files",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -29,6 +29,12 @@ func newValidateFixtureCmd() *cobra.Command {
 				return fail(2, "invalid --format %q (want table or json)", format)
 			}
 			dir := args[0]
+			local, extra, err := ingest.MaterializeFixture(dir)
+			if err != nil {
+				return fail(2, "%v", err)
+			}
+			defer extra()
+			dir = local
 			required := []string{
 				"meta.yaml", "services.yaml", "owners.yaml", "changes.yaml",
 				"dependencies.yaml", "alerts.yaml",

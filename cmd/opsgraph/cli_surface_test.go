@@ -15,7 +15,7 @@ func TestCLICommandSurfaceFrozen(t *testing.T) {
 	want := []string{
 		"alerts", "ask", "blast", "changes", "compare", "completion", "demo",
 		"doctor", "evidence", "explain", "export", "fingerprint", "graph",
-		"handoff", "health", "impact", "ingest", "owners", "path", "report",
+		"handoff", "health", "impact", "ingest", "init", "owners", "pack", "path", "prove", "report",
 		"resolve", "score", "services", "status", "test", "timeline", "top",
 		"validate-fixture", "verify-runbook", "version", "watch", "who", "why",
 	}
@@ -32,6 +32,9 @@ func TestCLICriticalFlagsFrozen(t *testing.T) {
 		"export": {"config", "data-dir", "fixture", "format", "meta", "out"},
 		"health": {"config", "data-dir", "fixture", "format", "strict"},
 		"ingest": {"config", "data-dir", "fixture", "format", "merge", "replace"},
+		"init":   {"force", "git", "k8s", "out"},
+		"pack":   {"config", "data-dir", "fixture", "force", "format", "out", "since"},
+		"prove":  {"format"},
 	}
 	for name, want := range cases {
 		cmd, _, err := root.Find([]string{name})

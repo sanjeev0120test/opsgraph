@@ -83,8 +83,8 @@ func ingestK8sSnapshot(s *store.Store, fsys fs.FS, now time.Time) error {
 // ingestK8sFiles reads the given deployment/event files (if present), updates
 // service health, emits rollout changes, and records event evidence.
 func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time.Time, allow k8sAllow) error {
-	var deps k8sDeployments
-	if _, err := readYAML(fsys, depFile, &deps); err != nil {
+	deps, evs, err := loadK8sSnapshot(fsys, depFile, evFile)
+	if err != nil {
 		return err
 	}
 	skippedDep := 0
@@ -127,10 +127,6 @@ func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time
 		fmt.Fprintf(os.Stderr, "warning: skipped %d k8s deployments (missing service_id)\n", skippedDep)
 	}
 
-	var evs k8sEvents
-	if _, err := readYAML(fsys, evFile, &evs); err != nil {
-		return err
-	}
 	skippedNoSvc, skippedNoAt := 0, 0
 	for _, e := range evs.Events {
 		if e.ServiceID == "" {

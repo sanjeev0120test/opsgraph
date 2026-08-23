@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Optional Phase-2 demo: stand up a tiny kind cluster and show how a k8s
-# snapshot feeds opsgraph. NOT required for CI or everyday use.
+# Optional Phase-2 demo: stand up a tiny kind cluster and feed native kubectl
+# YAML into opsgraph (no custom dialect, no service catalog). NOT required for
+# CI or everyday use.
 # Prerequisites: docker, kind, kubectl. Free and local only.
 set -euo pipefail
 
@@ -39,48 +40,17 @@ spec:
           ports:
             - containerPort: 80
 YAML
+kubectl rollout status deploy/checkout --timeout=90s
 
-echo "==> export snapshot for opsgraph (plain YAML, no client-go)"
-cat >"$SNAP/deployments.yaml" <<YAML
-deployments:
-  - name: checkout
-    namespace: default
-    service_id: checkout
-    desired: 1
-    ready: 1
-    updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-YAML
-cat >"$SNAP/events.yaml" <<'YAML'
-events: []
-YAML
-cat >"$SNAP/releases.yaml" <<YAML
-releases:
-  - name: checkout
-    service_id: checkout
-    chart: checkout
-    version: 0.1.0
-    revision: 1
-    updated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-YAML
+echo "==> export native kubectl YAML (no opsgraph dialect, no client-go)"
+kubectl get deploy -o yaml >"$SNAP/deployments.yaml"
+kubectl get events -o yaml >"$SNAP/events.yaml"
 
 CFG="$SNAP/opsgraph.yaml"
-cat >"$CFG" <<YAML
-version: 1
-services:
-  checkout:
-    owner: demo
-owners:
-  demo:
-    name: Demo Team
-connectors:
-  git:
-    enabled: false
-  kubernetes:
-    enabled: true
-    snapshot: $SNAP
-YAML
+echo "==> opsgraph init (no service catalog)"
+(cd "$ROOT" && go run ./cmd/opsgraph init --out "$CFG" --k8s "$SNAP" --force)
 
-echo "==> opsgraph ask checkout (from snapshot)"
-(cd "$ROOT" && go run ./cmd/opsgraph ask checkout --config "$CFG" --since 60m)
+echo "==> opsgraph ask (auto-select hottest service from snapshot)"
+(cd "$ROOT" && go run ./cmd/opsgraph ask --config "$CFG" --since 60m)
 
 echo "OK - kind demo finished (cluster left running: kind delete cluster --name $CLUSTER)"

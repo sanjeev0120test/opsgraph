@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -47,9 +48,17 @@ func IngestGit(s *store.Store, repoPath string, services []ServicePaths, since, 
 		if err != nil {
 			return err
 		}
-		for _, sp := range services {
-			if !matchesAny(files, sp.Paths) {
+		targets := expandGitTargets(services, files)
+		for _, sp := range targets {
+			paths := sp.Paths
+			if len(paths) == 0 {
+				paths = DefaultGitPaths(sp.ServiceID)
+			}
+			if !matchesGit(files, sp.ServiceID, paths) {
 				continue
+			}
+			if err := ensureGitService(s, sp.ServiceID); err != nil {
+				return err
 			}
 			if err := recordCommit(s, c, sp.ServiceID); err != nil {
 				return err
@@ -125,6 +134,24 @@ func changedFiles(c *object.Commit) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func ensureGitService(s *store.Store, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	svc, err := s.GetService(id)
+	if err == nil {
+		svc.Sources = addSource(svc.Sources, "git")
+		return s.UpsertService(*svc)
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return s.UpsertService(model.Service{
+		ID: id, Name: id, Health: model.HealthUnknown, Sources: []string{"git"},
+	})
 }
 
 func matchesAny(files, prefixes []string) bool {

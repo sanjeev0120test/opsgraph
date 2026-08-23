@@ -124,7 +124,7 @@ type Correlation struct {
 	Gap            string `json:"gap"` // e.g. "7m"
 }
 
-// AskResult is the full answer for `opsgraph ask <service>`.
+// AskResult is the full answer for `opsgraph ask [service]`.
 type AskResult struct {
 	Service         Service         `json:"service"`
 	Owner           *Owner          `json:"owner,omitempty"`

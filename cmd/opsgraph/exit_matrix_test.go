@@ -22,13 +22,18 @@ func TestCoreExitCodeMatrix(t *testing.T) {
 		want int
 	}{
 		{"ask_ok", []string{"ask", "checkout", "--fixture", fx, "--format", "json"}, 0},
+		{"ask_hottest", []string{"ask", "--fixture", fx, "--format", "json"}, 0},
 		{"ask_unknown", []string{"ask", "nosuch", "--fixture", fx}, 1},
 		{"ask_no_source", []string{"ask", "checkout"}, 2},
+		{"ask_no_args_no_source", []string{"ask"}, 2},
 		{"ask_fixture_data_dir", []string{"ask", "checkout", "--fixture", fx, "--data-dir", dir}, 2},
 		{"ask_negative_since", []string{"ask", "checkout", "--fixture", fx, "--since", "-1m"}, 2},
 		{"verify_stale", []string{"verify-runbook", "checkout", "--fixture", fx}, 1},
 		{"verify_pass", []string{"verify-runbook", "auth", "--fixture", fx}, 0},
 		{"test_ok", []string{"test", fx}, 0},
+		{"pack_ok", []string{"pack", "--fixture", fx, "--out", filepath.Join(dir, "pack"), "--format", "json"}, 0},
+		{"prove_ok", []string{"prove", "--format", "json"}, 0},
+		{"root_start", []string{}, 0},
 		{"demo_ok", []string{"demo"}, 0},
 		{"status_empty", []string{"status", "--data-dir", dir}, 1},
 		{"health_strict_hot", []string{"health", "--fixture", fx, "--strict"}, 1},

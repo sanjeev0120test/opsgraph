@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: checkout
+      namespace: default
+      labels:
+        app: checkout
+      creationTimestamp: "2026-07-31T11:00:00Z"
+    spec:
+      replicas: 3
+    status:
+      readyReplicas: 1
+      conditions:
+        - type: Progressing
+          status: "True"
+          lastUpdateTime: "2026-07-31T11:38:00Z"
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: auth
+      namespace: default
+      labels:
+        app.kubernetes.io/name: auth
+    spec:
+      replicas: 2
+    status:
+      readyReplicas: 0
+      conditions:
+        - type: Progressing
+          lastUpdateTime: "2026-07-31T09:00:00Z"
+  - apiVersion: v1
+    kind: Event
+    metadata:
+      name: checkout.17f8c
+      namespace: default
+    involvedObject:
+      kind: Pod
+      name: checkout-7d9f8c4b5d-xk2n1
+      namespace: default
+    reason: Unhealthy
+    message: "Readiness probe failed: HTTP 503 from /healthz"
+    type: Warning
+    lastTimestamp: "2026-07-31T11:50:00Z"
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: ignored
+    data:
+      x: y

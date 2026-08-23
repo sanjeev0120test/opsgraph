@@ -83,7 +83,7 @@ func verifyTarget(ls *loadedStore, target string) (model.VerifyResult, error) {
 		if err != nil {
 			return model.VerifyResult{}, fail(2, "read runbook %q: %v", target, err)
 		}
-		rb, _, err := runbook.Parse(data, filepath.ToSlash(target))
+		rb, _, err := runbook.ParseWithInfer(data, filepath.ToSlash(target))
 		if err != nil {
 			return model.VerifyResult{}, fail(2, "parse runbook %q: %v", target, err)
 		}
