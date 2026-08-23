@@ -153,8 +153,10 @@ func TestProveJSON(t *testing.T) {
 	if payload.Service != "checkout" {
 		t.Fatalf("service=%q", payload.Service)
 	}
-	if len(payload.SHA256) != 64 {
-		t.Fatalf("sha256=%q", payload.SHA256)
+	// Frozen so ubuntu/macOS/windows CI prove the unique claim: same .opsgraph bytes.
+	const wantSHA = "76f3b7052e9ee7c06084ca894a884b9b3b62030478cffcc1d4aefd27bfebb442"
+	if payload.SHA256 != wantSHA {
+		t.Fatalf("prove pack sha256 = %s want %s (portable hash drifted)", payload.SHA256, wantSHA)
 	}
 }
 
@@ -183,6 +185,9 @@ func TestProveReceiptOpenStableFromScratch(t *testing.T) {
 		}
 		if i == 0 {
 			proveSHA = prove.SHA256
+			if proveSHA != "76f3b7052e9ee7c06084ca894a884b9b3b62030478cffcc1d4aefd27bfebb442" {
+				t.Fatalf("prove sha256 = %s (portable hash drifted)", proveSHA)
+			}
 		} else if prove.SHA256 != proveSHA {
 			t.Fatalf("prove sha256 drifted on from-scratch run %d\n first %s\n got   %s", i+1, proveSHA, prove.SHA256)
 		}

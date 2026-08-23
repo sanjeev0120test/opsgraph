@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sanjeev0120test/opsgraph/fixtures"
 	"github.com/sanjeev0120test/opsgraph/internal/ingest"
@@ -114,5 +115,35 @@ func TestUnzipPackRejectsDotDot(t *testing.T) {
 	}
 	if err := ingest.UnzipPack(zipPath, dest); err == nil {
 		t.Fatal("expected unsafe path error")
+	}
+}
+
+func TestZipPackHeadersArePortable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "t.opsgraph")
+	if err := ingest.ZipPack(dir, zipPath); err != nil {
+		t.Fatal(err)
+	}
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if len(r.File) != 1 {
+		t.Fatalf("files=%d", len(r.File))
+	}
+	h := r.File[0].FileHeader
+	if h.Name != "a.txt" {
+		t.Fatalf("name=%q", h.Name)
+	}
+	if h.CreatorVersion&0xff00 != 0 {
+		t.Fatalf("CreatorVersion OS byte = %d want 0 (must not encode GOOS)", h.CreatorVersion>>8)
+	}
+	want := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	if h.Modified.UTC().Unix() != want {
+		t.Fatalf("Modified unix = %d want %d", h.Modified.UTC().Unix(), want)
 	}
 }

@@ -94,9 +94,10 @@ func ZipPack(srcDir, destZip string) error {
 	fixed := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, name := range names {
 		hdr := &zip.FileHeader{
-			Name:     name,
-			Method:   zip.Deflate,
-			Modified: fixed,
+			Name:           name,
+			Method:         zip.Deflate,
+			Modified:       fixed,
+			CreatorVersion: 20, // MS-DOS host; must not be GOOS-dependent
 		}
 		w, err := zw.CreateHeader(hdr)
 		if err != nil {
