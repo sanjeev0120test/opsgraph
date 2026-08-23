@@ -28,6 +28,15 @@ jobs:
         with:
           fail-on-severity: high
           # MIT offline CLI: allowlist only (action forbids allow-licenses + deny-licenses together).
+          # LicenseRef-scancode-google-patent-license-golang is the Go patent grant
+          # on golang.org/x/*; GitHub now reports it as AND with BSD-3-Clause.
           allow-licenses: >-
             MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, 0BSD,
-            Unlicense, CC0-1.0, BlueOak-1.0.0, PostgreSQL, Zlib, BSL-1.0
+            Unlicense, CC0-1.0, BlueOak-1.0.0, PostgreSQL, Zlib, BSL-1.0,
+            LicenseRef-scancode-google-patent-license-golang
+          # GitHub's license graph lags new Go module versions. These are
+          # BSD-3-Clause (modernc) / MIT (go-isatty); verified from upstream.
+          allow-dependencies-licenses: >
+            pkg:golang/modernc.org/sqlite@1.57.0,
+            pkg:golang/modernc.org/libc@1.74.4,
+            pkg:golang/github.com/mattn/go-isatty@0.0.24
