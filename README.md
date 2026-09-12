@@ -343,8 +343,6 @@ automation surfaces.
 - Pin a release tag in installers. Tip of `main` is `go install …@main`.
   `go install …@latest` is the highest semver tag, not the branch.
 
-## Can I trust it?
-
 `opsgraph prove` is the contract: same evidence IDs and the same `.opsgraph`
 SHA-256 on any OS, no cluster. CI runs that on ubuntu, macOS, and Windows.
 Read [Architecture](docs/ARCHITECTURE.md) if you need the pipeline, not the pitch.
