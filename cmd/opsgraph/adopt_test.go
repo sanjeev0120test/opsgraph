@@ -90,6 +90,11 @@ func strconvQuoteForTest(s string) string {
 }
 
 func TestAskEventsK8sV1Dump(t *testing.T) {
+	if testing.Short() {
+		// Parser coverage lives in internal/ingest. Another OpenTemp+ask here
+		// is what pushed Windows cmd/opsgraph over the 4m -short budget.
+		t.Skip("skip extra SQLite walk under -short")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "k8s-snapshot.yaml"), []byte(eventsV1DumpForAsk), 0o644); err != nil {
 		t.Fatal(err)
