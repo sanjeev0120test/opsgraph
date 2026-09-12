@@ -8,3 +8,13 @@ rules:
   superfluous-actions:
     ignore:
       - release.yml
+  # The `$/` self-repository form is github.com-only (not GitHub Enterprise
+  # Server) and needs runner >= 2.336.0. Every job here already checks the
+  # repository out, so `./` resolves to the same commit and the pinning problem
+  # `$/` exists to solve does not apply. Revisit once GHES supports it.
+  self-repository:
+    ignore:
+      - ci.yml
+      - codeql.yml
+      - release.yml
+      - repro-build.yml
