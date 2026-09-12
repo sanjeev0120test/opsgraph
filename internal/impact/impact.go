@@ -60,6 +60,10 @@ func Downstream(root string, services []model.Service, deps []model.Dependency) 
 		n := Node{ID: id, Health: health[id], Depth: depth, Children: []Node{}}
 		for _, child := range children[id] {
 			if seen[child] {
+				// Diamond: show the extra edge as a leaf so the tree matches the DAG.
+				n.Children = append(n.Children, Node{
+					ID: child, Health: health[child], Depth: depth + 1, Children: []Node{},
+				})
 				continue
 			}
 			seen[child] = true

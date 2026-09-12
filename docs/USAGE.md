@@ -12,9 +12,9 @@ A pack path as the first argument is opened (`opsgraph incident.opsgraph` equals
 Most inspection commands accept `--format table|json` (default `table`).
 Exceptions: `graph` (`ascii|table|mermaid|json`), `export`/`report` (`json|markdown`), `watch` (`--once` supports `--format json`).
 `status` / `doctor` / `ingest` / `pack` / `prove` / `open` / `receipt` / `delta` / `version` / `validate-fixture` / `test` / `why` / `handoff` / `explain` / `evidence` accept `--format json`.
-`health --strict` exits `1` when any service is degraded, unhealthy, or unknown (fail-closed); JSON includes `"ok": true|false`.
+`health --strict` exits `1` when any **real** service is degraded, unhealthy, or unknown (fail-closed). Dependency stubs and git-only unknown folders are ignored; JSON includes `"ok": true|false`.
 Healthy-path CI pack: `fixtures/fleet_healthy` (all services healthy; use with `health --strict`).
-`status` JSON includes `"ok"` / `"has_data"`; `path` JSON includes `"ok"` / `"found"` (missing routes still exit `1` with a JSON envelope).
+`status` JSON includes `"ok"` / `"has_data"`; `path` JSON includes `"ok"` / `"found"` / `"direction"` (`depends_on` or `dependents`). Missing routes still exit `1` with a JSON envelope. `path auth order` works when the only edges are order → checkout → auth.
 List commands treat `--limit 0` as unlimited (`changes`/`top`/`alerts`/`timeline`/`evidence`).
 `export --meta` prints `{path,bytes,service,format}` for automation.
 
@@ -45,7 +45,7 @@ opsgraph ask checkout --fixture fixtures/incident_checkout
 opsgraph ask --fixture fixtures/incident_checkout
 
 # CWD dump, no flags, no catalog:
-kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
+kubectl get deploy,statefulset,daemonset,job,event -o yaml > k8s-snapshot.yaml
 opsgraph ask
 
 # From a persistent store (explicit; no live re-scrape):
@@ -73,7 +73,7 @@ Other exits: `status` with no data → `1`; `watch` timeout → `1` (bad config 
 Write `.opsgraph.yaml` for this repo. No service catalog required.
 
 ```bash
-kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
+kubectl get deploy,statefulset,daemonset,job,event -o yaml > k8s-snapshot.yaml
 opsgraph init --k8s k8s-snapshot.yaml
 opsgraph ask
 ```
@@ -186,7 +186,7 @@ Fleet alert list. `--firing` keeps active (`firing`/`pending`) alerts; `--servic
 | `impact` | Recursive downstream impact |
 | `changes`, `alerts`, `timeline` (`--limit`), `evidence` | Signal browsers |
 | `explain`, `why`, `score`, `fingerprint` | Hypotheses / severity |
-| `path`, `graph`, `compare`, `who`, `resolve` | Topology / ownership |
+| `path`, `graph`, `compare`, `who`, `resolve` | Topology / ownership (`path` tries depends-on, then dependents) |
 | `report`, `export`, `handoff` | Markdown/JSON/text handoff |
 | `watch` | Poll until healthy (default interval 5s; live/persistent sources) |
 | `validate-fixture`, `completion`, `init`, `pack`, `prove`, `open`, `receipt`, `delta` | Pack checks / proof / open emailed file / pasteable receipt / evidence-ID diff |
@@ -201,7 +201,7 @@ Fleet alert list. `--firing` keeps active (`firing`/`pending`) alerts; `--servic
 In `.opsgraph.yaml` (see `.opsgraph.example.yaml`):
 
 - `connectors.git` — local repo scan
-- `connectors.kubernetes.snapshot` — directory or file. Accepts native `kubectl get -o yaml` (`kind: List` / `Deployment` / `StatefulSet` / `DaemonSet` / `Event`, including multi-doc) and the opsgraph dialect (`deployments:` / `events:`). Optional Helm `releases.yaml`.
+- `connectors.kubernetes.snapshot` — directory or file. Accepts native `kubectl get -o yaml` (`kind: List` / `Deployment` / `StatefulSet` / `DaemonSet` / `Job` / `Event`, including multi-doc) and the opsgraph dialect (`deployments:` / `events:`). Optional Helm `releases.yaml`.
 - `connectors.prometheus` / `connectors.alertmanager` — disabled by default
 - `connectors.plugins` — local commands that print opsgraph pack YAML on stdout
   (`services`, `owners`, `changes`, `dependencies`, `alerts`). Never discovered

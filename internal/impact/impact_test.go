@@ -50,6 +50,31 @@ func TestDownstreamCycleAndDiamond(t *testing.T) {
 	}
 }
 
+func TestDownstreamDiamondShowsBothParents(t *testing.T) {
+	svcs := []model.Service{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
+	deps := []model.Dependency{
+		{FromServiceID: "b", ToServiceID: "a"},
+		{FromServiceID: "c", ToServiceID: "a"},
+		{FromServiceID: "d", ToServiceID: "b"},
+		{FromServiceID: "d", ToServiceID: "c"},
+	}
+	res := impact.Downstream("a", svcs, deps)
+	var sawD int
+	var walk func(n impact.Node)
+	walk = func(n impact.Node) {
+		if n.ID == "d" {
+			sawD++
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(res.Tree)
+	if sawD < 2 {
+		t.Fatalf("diamond should show d under both parents, appearances=%d tree=%+v", sawD, res.Tree)
+	}
+}
+
 func TestDownstreamEmptyRoot(t *testing.T) {
 	res := impact.Downstream("  ", nil, []model.Dependency{{FromServiceID: "a", ToServiceID: "b"}})
 	if res.Root != "" || len(res.Affected) != 0 {

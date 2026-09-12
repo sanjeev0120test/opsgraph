@@ -103,7 +103,7 @@ func summarizeFleetHealth(svcs []model.Service) fleetHealth {
 		}
 		counts[h]++
 		by[h] = append(by[h], s.ID)
-		if model.IsDependencyStub(s) {
+		if model.IsNoiseForPaging(s) {
 			continue
 		}
 		switch h {

@@ -11,10 +11,11 @@ import (
 
 // Path is an ordered list of service IDs from start to goal along depends-on edges.
 type Path struct {
-	From  string   `json:"from"`
-	To    string   `json:"to"`
-	Nodes []string `json:"nodes"`
-	Hops  int      `json:"hops"`
+	From      string   `json:"from"`
+	To        string   `json:"to"`
+	Nodes     []string `json:"nodes"`
+	Hops      int      `json:"hops"`
+	Direction string   `json:"direction,omitempty"`
 }
 
 // Shortest finds the shortest depends-on path from → to (BFS).
@@ -25,7 +26,7 @@ func Shortest(deps []model.Dependency, from, to string) (Path, error) {
 		return Path{}, fmt.Errorf("path requires non-empty service ids")
 	}
 	if from == to {
-		return Path{From: from, To: to, Nodes: []string{from}, Hops: 0}, nil
+		return Path{From: from, To: to, Nodes: []string{from}, Hops: 0, Direction: "depends_on"}, nil
 	}
 	adj := map[string][]string{}
 	for _, d := range deps {
@@ -53,13 +54,34 @@ func Shortest(deps []model.Dependency, from, to string) (Path, error) {
 			}
 			np := append(append([]string{}, cur.path...), next)
 			if next == to {
-				return Path{From: from, To: to, Nodes: np, Hops: len(np) - 1}, nil
+				return Path{From: from, To: to, Nodes: np, Hops: len(np) - 1, Direction: "depends_on"}, nil
 			}
 			seen[next] = true
 			q = append(q, item{next, np})
 		}
 	}
 	return Path{}, fmt.Errorf("no dependency path from %q to %q", from, to)
+}
+
+// ShortestAny tries depends-on first, then the reverse (who depends on whom)
+// so `path auth order` works when order → checkout → auth.
+func ShortestAny(deps []model.Dependency, from, to string) (Path, error) {
+	p, err := Shortest(deps, from, to)
+	if err == nil {
+		return p, nil
+	}
+	rev := make([]model.Dependency, 0, len(deps))
+	for _, d := range deps {
+		rev = append(rev, model.Dependency{
+			FromServiceID: d.ToServiceID, ToServiceID: d.FromServiceID, Type: d.Type,
+		})
+	}
+	p, err2 := Shortest(rev, from, to)
+	if err2 != nil {
+		return Path{}, err
+	}
+	p.Direction = "dependents"
+	return p, nil
 }
 
 func uniqSorted(ids []string) []string {

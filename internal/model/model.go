@@ -1,7 +1,10 @@
 // Package model holds the core domain types shared across opsgraph.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Health values.
 const (
@@ -35,6 +38,51 @@ func IsDependencyStub(s Service) bool {
 		}
 	}
 	return true
+}
+
+// IsGitOnlyUnknown is a folder inferred from git with no k8s/fixture health.
+// Hottest must not prefer it over a healthy Deployment (unknown scores 10).
+func IsGitOnlyUnknown(s Service) bool {
+	if s.Health != HealthUnknown && s.Health != "" {
+		return false
+	}
+	if len(s.Sources) == 0 {
+		return false
+	}
+	for _, src := range s.Sources {
+		if src != "git" {
+			return false
+		}
+	}
+	return true
+}
+
+// IsSystemAgent is a node agent / kube-system style name. Hottest prefers
+// app services when any exist so `kubectl get -A` does not auto-select Fluent Bit.
+func IsSystemAgent(id string) bool {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		return false
+	}
+	switch id {
+	case "fluentbit", "fluent-bit", "fluentd", "coredns", "kube-proxy",
+		"calico-node", "cilium", "cilium-agent", "aws-node", "ebs-csi-node",
+		"efs-csi-node", "nvidia-device-plugin", "datadog-agent", "node-exporter",
+		"prometheus-node-exporter", "metrics-server":
+		return true
+	}
+	for _, p := range []string{"calico-", "cilium-", "fluent-bit", "ebs-csi-", "aws-node"} {
+		if strings.HasPrefix(id, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNoiseForPaging is a stub or git folder with no real health. Hottest, top,
+// and health --strict must not treat it as a paging service.
+func IsNoiseForPaging(s Service) bool {
+	return IsDependencyStub(s) || IsGitOnlyUnknown(s)
 }
 
 // Owner is a team or person responsible for services.

@@ -53,6 +53,36 @@ func TestIsDependencyStub(t *testing.T) {
 	}
 }
 
+func TestIsGitOnlyUnknown(t *testing.T) {
+	if !IsGitOnlyUnknown(Service{ID: "foo", Health: HealthUnknown, Sources: []string{"git"}}) {
+		t.Fatal("git-only unknown must be skipped by hottest")
+	}
+	if IsGitOnlyUnknown(Service{ID: "co", Health: HealthDegraded, Sources: []string{"git", "kubernetes"}}) {
+		t.Fatal("real k8s+git service is not git-only")
+	}
+}
+
+func TestIsNoiseForPaging(t *testing.T) {
+	if !IsNoiseForPaging(Service{ID: "redis", Health: HealthUnknown, Sources: []string{"dependency"}}) {
+		t.Fatal("stub is noise")
+	}
+	if !IsNoiseForPaging(Service{ID: "internal", Health: HealthUnknown, Sources: []string{"git"}}) {
+		t.Fatal("git-only unknown is noise")
+	}
+	if IsNoiseForPaging(Service{ID: "checkout", Health: HealthHealthy, Sources: []string{"kubernetes"}}) {
+		t.Fatal("app is not noise")
+	}
+}
+
+func TestIsSystemAgent(t *testing.T) {
+	if !IsSystemAgent("fluentbit") || !IsSystemAgent("calico-node") {
+		t.Fatal("agents")
+	}
+	if IsSystemAgent("checkout") {
+		t.Fatal("checkout is an app")
+	}
+}
+
 func TestHealthConstants(t *testing.T) {
 	for _, h := range []string{HealthHealthy, HealthDegraded, HealthUnhealthy, HealthUnknown} {
 		if h == "" {

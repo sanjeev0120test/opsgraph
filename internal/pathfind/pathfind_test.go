@@ -56,6 +56,20 @@ func TestShortestThroughCycle(t *testing.T) {
 	}
 }
 
+func TestShortestAnyReverseDependents(t *testing.T) {
+	deps := []model.Dependency{
+		{FromServiceID: "order", ToServiceID: "checkout"},
+		{FromServiceID: "checkout", ToServiceID: "auth"},
+	}
+	p, err := pathfind.ShortestAny(deps, "auth", "order")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Direction != "dependents" || p.Hops != 2 || p.Nodes[0] != "auth" || p.Nodes[2] != "order" {
+		t.Fatalf("reverse path: %+v", p)
+	}
+}
+
 func TestShortestEmptyIDs(t *testing.T) {
 	if _, err := pathfind.Shortest(nil, "", "a"); err == nil {
 		t.Fatal("empty from must fail")

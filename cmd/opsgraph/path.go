@@ -11,7 +11,7 @@ func newPathCmd() *cobra.Command {
 	var format string
 	cmd := &cobra.Command{
 		Use:               "path <from> <to>",
-		Short:             "Find the shortest depends-on path between two services",
+		Short:             "Find the shortest path between two services (depends-on, then dependents)",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeServiceArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -44,33 +44,38 @@ func newPathCmd() *cobra.Command {
 			if err != nil {
 				return fail(2, "%v", err)
 			}
-			p, err := pathfind.Shortest(deps, from.ID, to.ID)
+			p, err := pathfind.ShortestAny(deps, from.ID, to.ID)
 			if err != nil {
 				if format == "json" {
 					_ = output.JSON(cmd.OutOrStdout(), map[string]any{
-						"from":  from.ID,
-						"to":    to.ID,
-						"found": false,
-						"ok":    false,
-						"nodes": []string{},
-						"hops":  0,
-						"error": err.Error(),
+						"from":      from.ID,
+						"to":        to.ID,
+						"found":     false,
+						"ok":        false,
+						"nodes":     []string{},
+						"hops":      0,
+						"direction": "",
+						"error":     err.Error(),
 					})
 				}
 				return fail(1, "%v", err)
 			}
 			if format == "json" {
 				return output.JSON(cmd.OutOrStdout(), map[string]any{
-					"from":  p.From,
-					"to":    p.To,
-					"found": true,
-					"ok":    true,
-					"nodes": p.Nodes,
-					"hops":  p.Hops,
+					"from":      p.From,
+					"to":        p.To,
+					"found":     true,
+					"ok":        true,
+					"nodes":     p.Nodes,
+					"hops":      p.Hops,
+					"direction": p.Direction,
 				})
 			}
 			cmd.Printf("PATH  %v\n", p.Nodes)
 			cmd.Printf("HOPS  %d\n", p.Hops)
+			if p.Direction == "dependents" {
+				cmd.Printf("VIA   dependents (reverse of depends-on)\n")
+			}
 			return nil
 		},
 	}

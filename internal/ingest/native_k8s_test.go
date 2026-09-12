@@ -24,6 +24,9 @@ func TestLooksNativeK8s(t *testing.T) {
 }
 
 func TestInferServiceID(t *testing.T) {
+	if got := inferServiceID("Deployment", "payments-worker", map[string]string{"app.kubernetes.io/component": "billing"}); got != "billing" {
+		t.Fatalf("component label: got %q", got)
+	}
 	if got := inferServiceID("Deployment", "checkout-api", map[string]string{"app": "checkout"}); got != "checkout" {
 		t.Fatalf("label app: got %q", got)
 	}
@@ -523,6 +526,115 @@ func TestDeploymentRolloutIDsUnchanged(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("legacy deployment rollout id missing: %+v", evs)
+	}
+}
+
+const jobFailedYAML = `
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: billing-settle-28654321
+  namespace: shop
+  labels:
+    app.kubernetes.io/name: billing-settle
+spec:
+  completions: 1
+status:
+  succeeded: 0
+  failed: 1
+---
+apiVersion: v1
+kind: Event
+metadata:
+  name: billing-settle-28654321.17f8c
+  namespace: shop
+involvedObject:
+  kind: Job
+  name: billing-settle-28654321
+  namespace: shop
+reason: BackoffLimitExceeded
+message: Job has reached the specified backoff limit
+lastTimestamp: "2026-07-31T11:50:00Z"
+`
+
+func TestParseJobFailedIsUnhealthy(t *testing.T) {
+	if !looksNativeK8s([]byte(jobFailedYAML)) {
+		t.Fatal("Job YAML must look native")
+	}
+	deps, evs, _, err := parseNativeK8s([]byte(jobFailedYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps.Deployments) != 1 {
+		t.Fatalf("jobs = %d want 1: %+v", len(deps.Deployments), deps.Deployments)
+	}
+	j := deps.Deployments[0]
+	if j.Kind != "job" || j.ServiceID != "billing-settle" || j.Desired != 1 || j.Ready != 0 {
+		t.Fatalf("failed job: %+v", j)
+	}
+	if deploymentHealth(j.Desired, j.Ready) != "unhealthy" {
+		t.Fatalf("failed job health = %q", deploymentHealth(j.Desired, j.Ready))
+	}
+	if len(evs.Events) != 1 || evs.Events[0].ServiceID != "billing-settle" {
+		t.Fatalf("job event: %+v", evs.Events)
+	}
+}
+
+func TestJobInProgressDoesNotPage(t *testing.T) {
+	desired, ready := workloadReplicas(nativeObject{
+		Spec:   nativeDepSpec{Completions: intPtr(1)},
+		Status: nativeDepStatus{Active: 1},
+	}, "job")
+	if desired != 1 || ready != 1 {
+		t.Fatalf("in-progress job must look ready: desired=%d ready=%d", desired, ready)
+	}
+	desired, ready = workloadReplicas(nativeObject{
+		Spec:   nativeDepSpec{Completions: intPtr(3)},
+		Status: nativeDepStatus{Succeeded: 3},
+	}, "job")
+	if desired != 3 || ready != 3 {
+		t.Fatalf("completed job: desired=%d ready=%d", desired, ready)
+	}
+}
+
+func intPtr(n int) *int { return &n }
+
+func TestEventOnlyJobIsAskable(t *testing.T) {
+	root := t.TempDir()
+	body := `
+apiVersion: v1
+kind: Event
+metadata:
+  name: billing-settle-28654321.abc
+  namespace: shop
+involvedObject:
+  kind: Job
+  name: billing-settle-28654321
+reason: Completed
+message: Job completed
+lastTimestamp: "2026-07-31T11:50:00Z"
+`
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml",
+		time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC), k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := s.GetService("billing-settle")
+	if err != nil {
+		t.Fatalf("event-only Job must be askable: %v", err)
+	}
+	if svc.Health != "unknown" {
+		t.Fatalf("event-only health = %q", svc.Health)
+	}
+	if !hasSource(svc.Sources, "kubernetes") {
+		t.Fatalf("sources = %v", svc.Sources)
 	}
 }
 

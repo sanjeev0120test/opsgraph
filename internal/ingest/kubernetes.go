@@ -104,7 +104,7 @@ func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time
 	// fleet; say what was in the file and which kinds carry health.
 	if stats.Native && len(deps.Deployments) == 0 {
 		fmt.Fprintf(os.Stderr,
-			"warning: kubernetes snapshot has no Deployment/StatefulSet/DaemonSet workloads (found: %s)\n",
+			"warning: kubernetes snapshot has no Deployment/StatefulSet/DaemonSet/Job workloads (found: %s)\n",
 			stats.summary())
 	}
 	skippedDep := 0
@@ -181,6 +181,9 @@ func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time
 		}); err != nil {
 			return err
 		}
+		if err := ensureEventService(s, e.ServiceID); err != nil {
+			return err
+		}
 	}
 	if skippedNoSvc > 0 {
 		fmt.Fprintf(os.Stderr, "warning: skipped %d k8s events (missing service_id)\n", skippedNoSvc)
@@ -242,6 +245,26 @@ func applyDeploymentHealth(s *store.Store, d k8sDeployment) error {
 	svc.Health = mergeHealth(svc.Health, health, svc.Sources)
 	svc.Sources = addSource(svc.Sources, "kubernetes")
 	return s.UpsertService(*svc)
+}
+
+// ensureEventService makes Job/CronJob (and other) events askable. Existing
+// rows keep their health; a missing row is unknown + kubernetes.
+func ensureEventService(s *store.Store, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	svc, err := s.GetService(id)
+	if err == nil {
+		svc.Sources = addSource(svc.Sources, "kubernetes")
+		return s.UpsertService(*svc)
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return s.UpsertService(model.Service{
+		ID: id, Name: id, Health: model.HealthUnknown, Sources: []string{"kubernetes"},
+	})
 }
 
 // mergeHealth merges replica-derived health with prior state.

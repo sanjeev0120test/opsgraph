@@ -123,13 +123,15 @@ dump or a config. From a fresh clone, pass the fixture (or dump YAML first).
 **3. Optional: your cluster (read-only dump)**
 
 ```bash
-kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
+kubectl get deploy,statefulset,daemonset,job,event -o yaml > k8s-snapshot.yaml
 ./bin/opsgraph ask
 ./bin/opsgraph pack --force
 ```
 
-`ask` with no name picks the hottest service. StatefulSets and DaemonSets are
-first-class: `postgres` at 0/3 ready is `unhealthy`, not "service not found".
+`ask` with no name picks the hottest service (apps over git folders and
+kube-system agents). StatefulSets, DaemonSets, and Jobs are first-class:
+`postgres` at 0/3 ready is `unhealthy`; a failed Job is `unhealthy`;
+`ask billing-settle` works from Job events.
 
 ## Installation
 
@@ -251,7 +253,7 @@ Rules that keep this safe during an incident:
 | `test <pack>` | Compare goldens |
 | `verify-runbook` | Runbook vs current state |
 | `ingest` / `status` / `doctor` | Load / inspect / env check |
-| `health --strict` | Fail if any service is not healthy |
+| `health --strict` | Fail if any real (non-stub) service is not healthy |
 | `services`, `top`, `blast`, `impact` | Fleet |
 | `why`, `handoff`, `explain`, `score` | Narrative / severity |
 

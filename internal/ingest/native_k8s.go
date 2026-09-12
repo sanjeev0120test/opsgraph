@@ -45,7 +45,8 @@ type nativeObjectMeta struct {
 }
 
 type nativeDepSpec struct {
-	Replicas *int `yaml:"replicas"`
+	Replicas    *int `yaml:"replicas"`
+	Completions *int `yaml:"completions"`
 }
 
 type nativeDepStatus struct {
@@ -54,6 +55,9 @@ type nativeDepStatus struct {
 	// DaemonSets have no spec.replicas; readiness is counted per scheduled node.
 	DesiredNumberScheduled int               `yaml:"desiredNumberScheduled"`
 	NumberReady            int               `yaml:"numberReady"`
+	Succeeded              int               `yaml:"succeeded"`
+	Failed                 int               `yaml:"failed"`
+	Active                 int               `yaml:"active"`
 	Conditions             []nativeCondition `yaml:"conditions"`
 }
 
@@ -79,7 +83,7 @@ func normalizeKind(kind string) string {
 // per-node agents. Dropping any of them hides an outage behind "service not found".
 func isWorkloadKind(kind string) bool {
 	switch normalizeKind(kind) {
-	case "deployment", "statefulset", "daemonset":
+	case "deployment", "statefulset", "daemonset", "job":
 		return true
 	}
 	return false
@@ -94,7 +98,7 @@ func eventObjectKindAllowed(kind string) bool {
 }
 
 func hasAppLabel(labels map[string]string) bool {
-	for _, k := range []string{"app.kubernetes.io/name", "app"} {
+	for _, k := range []string{"app.kubernetes.io/name", "app", "app.kubernetes.io/component"} {
 		if strings.TrimSpace(labels[k]) != "" {
 			return true
 		}
@@ -314,6 +318,23 @@ func workloadReplicas(o nativeObject, kind string) (desired, ready int) {
 	if kind == "daemonset" {
 		return o.Status.DesiredNumberScheduled, o.Status.NumberReady
 	}
+	if kind == "job" {
+		desired = 1
+		if o.Spec.Completions != nil {
+			desired = *o.Spec.Completions
+		}
+		if desired <= 0 {
+			desired = 1
+		}
+		if o.Status.Succeeded >= desired {
+			return desired, desired
+		}
+		if o.Status.Failed > 0 {
+			return desired, 0
+		}
+		// In-progress or empty status: do not page.
+		return desired, desired
+	}
 	desired = 1
 	if o.Spec.Replicas != nil {
 		desired = *o.Spec.Replicas
@@ -385,7 +406,7 @@ func deploymentUpdatedAt(o nativeObject) time.Time {
 // inferServiceID maps a Kubernetes object onto an opsgraph service id.
 // Labels win; ReplicaSet/Pod names strip controller hashes that contain a digit.
 func inferServiceID(kind, name string, labels map[string]string) string {
-	for _, k := range []string{"app.kubernetes.io/name", "app"} {
+	for _, k := range []string{"app.kubernetes.io/name", "app", "app.kubernetes.io/component"} {
 		if v := strings.TrimSpace(labels[k]); v != "" {
 			return v
 		}

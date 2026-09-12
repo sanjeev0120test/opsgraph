@@ -34,4 +34,13 @@ func TestSummarizeFleetHealthIgnoresStubs(t *testing.T) {
 	if got.OK || got.UnknownReal != 1 {
 		t.Fatalf("healthy stub must not hide real unknown: ok=%v real=%d", got.OK, got.UnknownReal)
 	}
+
+	gitOnly := []model.Service{
+		{ID: "api", Health: model.HealthHealthy, Sources: []string{"kubernetes"}},
+		{ID: "internal", Health: model.HealthUnknown, Sources: []string{"git"}},
+	}
+	got = summarizeFleetHealth(gitOnly)
+	if !got.OK || got.UnknownReal != 0 {
+		t.Fatalf("git folder must not fail --strict: ok=%v real=%d", got.OK, got.UnknownReal)
+	}
 }

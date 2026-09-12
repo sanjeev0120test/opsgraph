@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/sanjeev0120test/opsgraph/internal/model"
 	"github.com/sanjeev0120test/opsgraph/internal/output"
 	"github.com/sanjeev0120test/opsgraph/internal/score"
 	"github.com/spf13/cobra"
@@ -46,6 +47,9 @@ func newTopCmd() *cobra.Command {
 			rows := make([]row, 0, len(svcs))
 			skipped := 0
 			for _, s := range svcs {
+				if model.IsNoiseForPaging(s) {
+					continue
+				}
 				res, err := askService(ls, s.ID, since)
 				if err != nil {
 					skipped++
