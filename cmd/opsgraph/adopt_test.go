@@ -89,6 +89,55 @@ func strconvQuoteForTest(s string) string {
 	return string(b)
 }
 
+func TestAskEventsK8sV1Dump(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "k8s-snapshot.yaml"), []byte(eventsV1DumpForAsk), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("OPSGRAPH_FIXTURE", "")
+	t.Setenv("OPSGRAPH_CONFIG", "")
+	t.Setenv("OPSGRAPH_DATA_DIR", "")
+	out, errOut, code := runRoot(t, "ask", "checkout", "--format", "json")
+	if code != 0 {
+		t.Fatalf("events.k8s.io/v1 ask exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"health": "degraded"`) {
+		t.Fatalf("expected degraded checkout:\n%s", out)
+	}
+	if !strings.Contains(out, "HTTP 503") {
+		t.Fatalf("events.k8s.io/v1 note never reached timeline:\n%s", out)
+	}
+}
+
+const eventsV1DumpForAsk = `apiVersion: v1
+kind: List
+items:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: checkout
+      labels:
+        app: checkout
+      creationTimestamp: "2026-07-31T11:00:00Z"
+    spec:
+      replicas: 3
+    status:
+      readyReplicas: 1
+  - apiVersion: events.k8s.io/v1
+    kind: Event
+    metadata:
+      name: checkout.17f8c
+      namespace: default
+    regarding:
+      kind: Pod
+      name: checkout-7d9f8c4b5d-xk2n1
+    reason: Unhealthy
+    note: "Readiness probe failed: HTTP 503 from /healthz"
+    type: Warning
+    eventTime: "2026-07-31T11:50:00.123456Z"
+`
+
 func TestAskAutoDetectsCwdSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(repoRoot(t), "internal", "ingest", "testdata", "kubectl-list.yaml")

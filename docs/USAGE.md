@@ -80,8 +80,8 @@ opsgraph ask
 
 `--k8s` accepts a directory (`deployments.yaml` + optional `events.yaml`) or a
 single kubectl YAML file (`kind: List` / `Deployment` / `StatefulSet` /
-`DaemonSet` / `Event`). `--force` overwrites an existing config. `--git`
-defaults to `.`.
+`DaemonSet` / `Event`, including `events.k8s.io/v1`). `--force` overwrites an
+existing config. `--git` defaults to `.`.
 
 Workload health comes from replica readiness: `spec.replicas` vs
 `status.readyReplicas` for Deployments and StatefulSets, and

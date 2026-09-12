@@ -41,10 +41,11 @@ Operators dump YAML themselves. The parser accepts:
 
 1. Native API objects: `kind: Deployment`, `kind: StatefulSet`,
    `kind: DaemonSet`, `kind: Event`, or `kind: List` of those
-   (including multi-document `---` streams). `service_id` is inferred from
-   `app.kubernetes.io/name` / `app` labels, else the object name (ReplicaSet/Pod
-   controller hashes that contain a digit are stripped; StatefulSet pods
-   `name-0` map to `name`).
+   (including multi-document `---` streams). Events accept both core/v1
+   (`involvedObject` + `message`) and `events.k8s.io/v1` (`regarding` + `note`).
+   `service_id` is inferred from `app.kubernetes.io/name` / `app` labels, else
+   the object name (ReplicaSet/Pod controller hashes that contain a digit are
+   stripped; StatefulSet pods `name-0` map to `name`).
 2. The opsgraph dialect (`deployments:` / `events:` with optional `service_id`).
    A missing `service_id` falls back to `name` so simplified dumps still ingest.
 

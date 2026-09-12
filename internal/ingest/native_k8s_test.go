@@ -3,6 +3,7 @@ package ingest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +152,100 @@ func TestCustomDialectInfersServiceIDFromName(t *testing.T) {
 	}
 	if svc.Health != "healthy" {
 		t.Fatalf("health = %q", svc.Health)
+	}
+}
+
+// events.k8s.io/v1 is what `kubectl get event` emits on current clusters.
+// regarding + note replace involvedObject + message; lastTimestamp is gone.
+const eventsV1Snapshot = `apiVersion: v1
+kind: List
+items:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: checkout
+      labels:
+        app: checkout
+    spec:
+      replicas: 3
+    status:
+      readyReplicas: 1
+  - apiVersion: events.k8s.io/v1
+    kind: Event
+    metadata:
+      name: checkout.17f8c
+      namespace: shop
+    regarding:
+      kind: Pod
+      name: checkout-7d9f8c4b5d-xk2n1
+      namespace: shop
+    reason: Unhealthy
+    note: "Readiness probe failed: HTTP 503 from /healthz"
+    type: Warning
+    eventTime: "2026-07-31T11:50:00.123456Z"
+    deprecatedLastTimestamp: "2026-07-31T11:50:00Z"
+`
+
+func TestParseEventsK8sV1RegardingAndNote(t *testing.T) {
+	if !looksNativeK8s([]byte(eventsV1Snapshot)) {
+		t.Fatal("events.k8s.io/v1 List should look native")
+	}
+	deps, evs, _, err := parseNativeK8s([]byte(eventsV1Snapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps.Deployments) != 1 || deps.Deployments[0].ServiceID != "checkout" {
+		t.Fatalf("deps: %+v", deps.Deployments)
+	}
+	if len(evs.Events) != 1 {
+		t.Fatalf("events = %d, want 1 (must not invent service checkout.17f8c): %+v", len(evs.Events), evs.Events)
+	}
+	ev := evs.Events[0]
+	if ev.ServiceID != "checkout" {
+		t.Fatalf("regarding pod hash should strip to checkout, got %q", ev.ServiceID)
+	}
+	if ev.Message != "Readiness probe failed: HTTP 503 from /healthz" {
+		t.Fatalf("note should become message, got %q", ev.Message)
+	}
+	if ev.Reason != "Unhealthy" || ev.Type != "Warning" {
+		t.Fatalf("event fields: %+v", ev)
+	}
+	wantAt := time.Date(2026, 7, 31, 11, 50, 0, 0, time.UTC)
+	if !ev.At.Equal(wantAt) {
+		t.Fatalf("at = %v, want %v (deprecatedLastTimestamp or eventTime)", ev.At, wantAt)
+	}
+	if ev.Namespace != "shop" {
+		t.Fatalf("namespace = %q", ev.Namespace)
+	}
+}
+
+func TestIngestEventsK8sV1EvidenceOnService(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), []byte(eventsV1Snapshot), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml", now, k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := s.ListAllEvidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range evs {
+		if e.Kind == "k8s-event" && e.ServiceID == "checkout" && strings.Contains(e.Summary, "HTTP 503") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("events.k8s.io/v1 note never became checkout evidence: %+v", evs)
 	}
 }
 
@@ -358,6 +453,7 @@ func FuzzParseNativeK8s(f *testing.F) {
 	f.Add([]byte("kind: List\nitems: []\n"))
 	f.Add([]byte("kind: Deployment\nmetadata:\n  name: x\n"))
 	f.Add([]byte("deployments:\n  - name: x\n"))
+	f.Add([]byte("kind: Event\napiVersion: events.k8s.io/v1\nregarding:\n  kind: Pod\n  name: x-0\nnote: n\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if !looksNativeK8s(data) {
 			return

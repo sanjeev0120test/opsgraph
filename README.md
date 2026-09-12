@@ -169,8 +169,8 @@ Then: `opsgraph version` and `opsgraph prove`.
 5. Someone else runs `opsgraph incident.opsgraph` or `delta`.
 
 Kubernetes parsing is native YAML (`kind: List` / `Deployment` / `StatefulSet`
-/ `DaemonSet` / `Event`). Health is replica readiness
-(`readyReplicas` / `desiredNumberScheduled`). No `kubectl` from the process.
+/ `DaemonSet` / `Event`, core/v1 or `events.k8s.io/v1`). Health is replica
+readiness (`readyReplicas` / `desiredNumberScheduled`). No `kubectl` from the process.
 
 ## Real-world usage
 
