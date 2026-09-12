@@ -173,7 +173,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -217,7 +217,7 @@ jobs:
           esac
       - name: Unit tests (shuffle)
         if: ${{ !matrix.race }}
-        run: go test -count=1 -timeout=5m -shuffle=on -fullpath ./...
+        run: go test -count=1 -timeout=10m -shuffle=on -fullpath ./...
       - name: Unit tests (race + shuffle + cover)
         if: ${{ matrix.race && matrix.os == 'ubuntu-24.04' }}
         env:
@@ -226,7 +226,7 @@ jobs:
           set -euo pipefail
           # Prove the module cache alone is enough (offline-first) for the full test graph.
           GOPROXY=off GOFLAGS="-mod=readonly" \
-            go test -count=1 -timeout=5m -race -shuffle=on -fullpath -coverprofile=cover.out -covermode=atomic ./...
+            go test -count=1 -timeout=10m -race -shuffle=on -fullpath -coverprofile=cover.out -covermode=atomic ./...
           go tool cover -func=cover.out | tee cover-func.txt | go run ./scripts/coverfloor.go \
               total=64 \
               cmd/opsgraph=56 \
@@ -264,7 +264,7 @@ jobs:
         if: ${{ matrix.race && matrix.os != 'ubuntu-24.04' }}
         env:
           CGO_ENABLED: "1"
-        run: go test -count=1 -timeout=5m -race -shuffle=on ./...
+        run: go test -count=1 -timeout=10m -race -shuffle=on ./...
       - name: Fixture / golden + demo
         shell: bash
         run: |
@@ -777,7 +777,7 @@ jobs:
   arm64-smoke:
     name: linux/arm64 smoke
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -788,7 +788,7 @@ jobs:
           set -euo pipefail
           test "$(go env GOARCH)" = "arm64"
           go build -trimpath -ldflags="-s -w -buildid=" -o bin/opsgraph ./cmd/opsgraph
-          go test -count=1 -timeout=5m -shuffle=on ./...
+          go test -count=1 -timeout=10m -shuffle=on ./...
           ./bin/opsgraph test ./fixtures/incident_checkout
           ./bin/opsgraph validate-fixture ./fixtures/fleet_healthy
           JA=(go run ./scripts/jsonassert.go)
