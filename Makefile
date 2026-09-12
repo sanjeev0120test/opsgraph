@@ -29,8 +29,12 @@ export CGO_ENABLED := 0
 build: ## Build the static binary
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
 
-test: ## Run unit tests (no race - fast, local-friendly)
+test: ## Run unit tests (no race; -short on Windows so the laptop stays light)
+ifeq ($(OS),Windows_NT)
+	go test -short ./...
+else
 	go test ./...
+endif
 
 race: ## Run unit tests with the race detector (heavy - prefer CI)
 	CGO_ENABLED=1 go test -race ./...

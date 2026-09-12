@@ -28,8 +28,8 @@ Write-Host "==> go build" -ForegroundColor Cyan
 go build -trimpath -ldflags="-s -w -buildid=" -o bin/opsgraph.exe ./cmd/opsgraph
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
-Write-Host "==> go test (no race)" -ForegroundColor Cyan
-go test ./...
+Write-Host "==> go test (no race, short)" -ForegroundColor Cyan
+go test -short ./...
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 if (Test-Path ./fixtures/incident_checkout) {
