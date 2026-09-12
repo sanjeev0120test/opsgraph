@@ -110,6 +110,17 @@ func TestLiveConnectorsEnabledRequiresUsableConfig(t *testing.T) {
 	if !liveConnectorsEnabled(cfg2) {
 		t.Fatal("prom with url should prefer live")
 	}
+	cfg3 := config.Default()
+	cfg3.Connectors.Plugins = []config.PluginConnector{{
+		Name: "deploys", Command: []string{"./bin/deploys"}, Enabled: true,
+	}}
+	if !liveConnectorsEnabled(cfg3) {
+		t.Fatal("an enabled plugin should prefer live so ask re-runs it")
+	}
+	cfg3.Connectors.Plugins[0].Enabled = false
+	if liveConnectorsEnabled(cfg3) {
+		t.Fatal("a disabled plugin must not prefer live")
+	}
 }
 
 func TestResolveDataDirConfigRelative(t *testing.T) {

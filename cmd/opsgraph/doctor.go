@@ -169,6 +169,15 @@ func newDoctorCmd() *cobra.Command {
 				} else {
 					check("alertmanager", false, cfg.Connectors.Alertmanager.URL+" unreachable")
 				}
+				if n := pluginEnabledCount(cfg.Connectors.Plugins); n == 0 {
+					if len(cfg.Connectors.Plugins) == 0 {
+						warnf("plugins", "none configured (optional)")
+					} else {
+						warnf("plugins", "configured but all disabled")
+					}
+				} else {
+					check("plugins", true, pluginEnabledNames(cfg.Connectors.Plugins))
+				}
 				if probeOllama(cmd.Context(), cfg.AI.OllamaURL) {
 					check("ollama", true, cfg.AI.OllamaURL)
 				} else {

@@ -185,6 +185,11 @@ func liveConnectorsEnabled(cfg *config.Config) bool {
 	if c.Alertmanager.Enabled && strings.TrimSpace(c.Alertmanager.URL) != "" {
 		return true
 	}
+	for _, p := range c.Plugins {
+		if p.Enabled && len(p.Command) > 0 && strings.TrimSpace(p.Command[0]) != "" {
+			return true
+		}
+	}
 	return false
 }
 
@@ -332,8 +337,7 @@ func liveHasRichSignal(s *store.Store) bool {
 	if err == nil && counts["evidence"] > 0 {
 		if evs, cerr := s.ListAllEvidence(); cerr == nil {
 			for _, e := range evs {
-				switch e.Source {
-				case "kubernetes", "prometheus", "alertmanager", "helm", "fixture":
+				if isIncidentSource(e.Source) {
 					return true
 				}
 			}
@@ -342,8 +346,7 @@ func liveHasRichSignal(s *store.Store) bool {
 	if err == nil && counts["changes"] > 0 {
 		if changes, cerr := s.ListAllChanges(); cerr == nil {
 			for _, c := range changes {
-				switch c.Source {
-				case "kubernetes", "prometheus", "alertmanager", "helm", "fixture":
+				if isIncidentSource(c.Source) {
 					return true
 				}
 			}
@@ -355,13 +358,43 @@ func liveHasRichSignal(s *store.Store) bool {
 	}
 	for _, svc := range svcs {
 		for _, src := range svc.Sources {
-			switch src {
-			case "kubernetes", "prometheus", "alertmanager", "helm", "fixture":
+			if isIncidentSource(src) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func pluginEnabledCount(plugins []config.PluginConnector) int {
+	n := 0
+	for _, p := range plugins {
+		if p.Enabled {
+			n++
+		}
+	}
+	return n
+}
+
+func pluginEnabledNames(plugins []config.PluginConnector) string {
+	var names []string
+	for _, p := range plugins {
+		if p.Enabled {
+			names = append(names, p.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return strings.Join(names, ",")
+}
+
+func isIncidentSource(src string) bool {
+	switch src {
+	case "kubernetes", "prometheus", "alertmanager", "helm", "fixture":
+		return true
+	}
+	return strings.HasPrefix(src, "plugin:")
 }
 
 // liveHasIncidentSignal reports whether a live scrape produced usable incident

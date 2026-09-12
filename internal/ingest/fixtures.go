@@ -98,28 +98,35 @@ type fxAlert struct {
 // ingestEntities parses and upserts services, owners, changes, dependencies,
 // alerts, runbooks, and their evidence.
 func ingestEntities(s *store.Store, fsys fs.FS) error {
-	if err := ingestServices(s, fsys); err != nil {
+	// serviceSource stays empty here: packed services already carry their
+	// sources, and adding one would change replayed ask output.
+	if err := ingestEntityFiles(s, fsys, "fixture", ""); err != nil {
+		return err
+	}
+	return ingestRunbooks(s, fsys)
+}
+
+// ingestEntityFiles reads the pack entity files. rowSource labels change,
+// alert and dependency rows that do not name their own source. serviceSource,
+// when set, is recorded on services that declare none, so plugin-supplied
+// entities stay attributable to the plugin that produced them.
+func ingestEntityFiles(s *store.Store, fsys fs.FS, rowSource, serviceSource string) error {
+	if err := ingestServices(s, fsys, serviceSource); err != nil {
 		return err
 	}
 	if err := ingestOwners(s, fsys); err != nil {
 		return err
 	}
-	if err := ingestChanges(s, fsys); err != nil {
+	if err := ingestChanges(s, fsys, rowSource); err != nil {
 		return err
 	}
-	if err := ingestDeps(s, fsys); err != nil {
+	if err := ingestDeps(s, fsys, rowSource); err != nil {
 		return err
 	}
-	if err := ingestAlerts(s, fsys); err != nil {
-		return err
-	}
-	if err := ingestRunbooks(s, fsys); err != nil {
-		return err
-	}
-	return nil
+	return ingestAlerts(s, fsys, rowSource)
 }
 
-func ingestServices(s *store.Store, fsys fs.FS) error {
+func ingestServices(s *store.Store, fsys fs.FS, serviceSource string) error {
 	var f fxServices
 	if _, err := readYAML(fsys, "services.yaml", &f); err != nil {
 		return err
@@ -129,9 +136,13 @@ func ingestServices(s *store.Store, fsys fs.FS) error {
 		if health == "" {
 			health = model.HealthUnknown
 		}
+		sources := v.Sources
+		if len(sources) == 0 && serviceSource != "" {
+			sources = []string{serviceSource}
+		}
 		if err := s.UpsertService(model.Service{
 			ID: v.ID, Name: v.Name, Aliases: v.Aliases, OwnerID: v.OwnerID,
-			Health: health, Labels: map[string]string(v.Labels), Sources: v.Sources,
+			Health: health, Labels: map[string]string(v.Labels), Sources: sources,
 		}); err != nil {
 			return err
 		}
@@ -152,14 +163,14 @@ func ingestOwners(s *store.Store, fsys fs.FS) error {
 	return nil
 }
 
-func ingestChanges(s *store.Store, fsys fs.FS) error {
+func ingestChanges(s *store.Store, fsys fs.FS, rowSource string) error {
 	var f fxChanges
 	if _, err := readYAML(fsys, "changes.yaml", &f); err != nil {
 		return err
 	}
 	for _, v := range f.Changes {
 		if v.Source == "" {
-			v.Source = "fixture"
+			v.Source = rowSource
 		}
 		if err := s.UpsertChange(model.Change{
 			ID: v.ID, ServiceID: v.ServiceID, At: v.At, Type: v.Type, Summary: v.Summary,
@@ -179,7 +190,7 @@ func ingestChanges(s *store.Store, fsys fs.FS) error {
 	return nil
 }
 
-func ingestDeps(s *store.Store, fsys fs.FS) error {
+func ingestDeps(s *store.Store, fsys fs.FS, rowSource string) error {
 	var f fxDeps
 	if _, err := readYAML(fsys, "dependencies.yaml", &f); err != nil {
 		return err
@@ -187,7 +198,7 @@ func ingestDeps(s *store.Store, fsys fs.FS) error {
 	for _, v := range f.Dependencies {
 		src := v.Source
 		if src == "" {
-			src = "fixture"
+			src = rowSource
 		}
 		for _, id := range []string{v.From, v.To} {
 			if err := ensureServiceStub(s, id); err != nil {
@@ -203,14 +214,14 @@ func ingestDeps(s *store.Store, fsys fs.FS) error {
 	return nil
 }
 
-func ingestAlerts(s *store.Store, fsys fs.FS) error {
+func ingestAlerts(s *store.Store, fsys fs.FS, rowSource string) error {
 	var f fxAlerts
 	if _, err := readYAML(fsys, "alerts.yaml", &f); err != nil {
 		return err
 	}
 	for _, v := range f.Alerts {
 		if v.Source == "" {
-			v.Source = "fixture"
+			v.Source = rowSource
 		}
 		if err := s.UpsertAlert(model.Alert{
 			ID: v.ID, ServiceID: v.ServiceID, At: v.At, Severity: v.Severity, Name: v.Name,

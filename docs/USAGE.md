@@ -203,6 +203,10 @@ In `.opsgraph.yaml` (see `.opsgraph.example.yaml`):
 - `connectors.git` — local repo scan
 - `connectors.kubernetes.snapshot` — directory or file. Accepts native `kubectl get -o yaml` (`kind: List` / `Deployment` / `StatefulSet` / `DaemonSet` / `Event`, including multi-doc) and the opsgraph dialect (`deployments:` / `events:`). Optional Helm `releases.yaml`.
 - `connectors.prometheus` / `connectors.alertmanager` — disabled by default
+- `connectors.plugins` — local commands that print opsgraph pack YAML on stdout
+  (`services`, `owners`, `changes`, `dependencies`, `alerts`). Never discovered
+  from PATH. A failing plugin fails the run. Kubernetes workload YAML is not
+  accepted here; dump that as a snapshot instead.
 
 Optional cluster demo: `bash hack/kind-demo.sh`.
 
