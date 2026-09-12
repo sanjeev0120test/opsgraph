@@ -161,7 +161,13 @@ func TestProveJSON(t *testing.T) {
 }
 
 func TestProveReceiptOpenStableFromScratch(t *testing.T) {
-	const n = 21
+	// Full 21-loop burn lives on ubuntu CI (no -short). Windows Defender +
+	// SQLite temp files make the same loop the 5-minute wall-clock hog.
+	// -short still replays prove/receipt/open twice so OS hash drift fails.
+	n := 21
+	if testing.Short() {
+		n = 2
+	}
 	fx := fixtureDir(t)
 	var proveSHA, receiptIDs, openBody string
 	for i := 0; i < n; i++ {

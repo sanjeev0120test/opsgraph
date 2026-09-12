@@ -13,7 +13,15 @@ import (
 // TestDefaultBuildHasNoK8sIO asserts the default build does not link any
 // k8s.io/* package. The v1 Kubernetes connector is a pure-Go snapshot parser;
 // client-go is intentionally not a dependency (see PLAN.md).
+func skipGraphRebuildIfShort(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("module-graph / rebuild gates run on the full ubuntu suite")
+	}
+}
+
 func TestDefaultBuildHasNoK8sIO(t *testing.T) {
+	skipGraphRebuildIfShort(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}
@@ -58,6 +66,7 @@ func TestGoModHygiene(t *testing.T) {
 // TestCmdOpsgraphIsPureGo asserts no package in the default link graph has
 // CgoFiles, so CGO_ENABLED=0 cross-builds stay valid on every OS.
 func TestCmdOpsgraphIsPureGo(t *testing.T) {
+	skipGraphRebuildIfShort(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}
@@ -78,6 +87,7 @@ func TestCmdOpsgraphIsPureGo(t *testing.T) {
 // TestNoFirstPartyUnsafe forbids importing "unsafe" in first-party packages.
 // Offline CLIs should stay reviewable without pointer games.
 func TestNoFirstPartyUnsafe(t *testing.T) {
+	skipGraphRebuildIfShort(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}
@@ -217,6 +227,7 @@ func TestDirectDepsAllowlisted(t *testing.T) {
 
 // TestForbiddenModulePrefixes keeps cloud/k8s/MCP stacks out of the link graph.
 func TestForbiddenModulePrefixes(t *testing.T) {
+	skipGraphRebuildIfShort(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}
@@ -253,6 +264,7 @@ func TestForbiddenModulePrefixes(t *testing.T) {
 
 // TestReleaseBuildHasEmptyBuildID proves -ldflags=-buildid= yields a reproducible stamp.
 func TestReleaseBuildHasEmptyBuildID(t *testing.T) {
+	skipGraphRebuildIfShort(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}

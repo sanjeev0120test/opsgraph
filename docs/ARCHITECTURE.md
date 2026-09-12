@@ -32,7 +32,7 @@
 
 ## Cross-platform
 
-`CGO_ENABLED=0`, `filepath` for OS paths, `fs.FS` + forward slashes for fixtures, LF via `.gitattributes`. CI covers ubuntu-24.04/macOS/windows, native linux/arm64 smoke, race+coverage floor on ubuntu, plus linux/darwin/windows × amd64/arm64 cross-builds.
+`CGO_ENABLED=0`, `filepath` for OS paths, `fs.FS` + forward slashes for fixtures, LF via `.gitattributes`. CI covers ubuntu-24.04/macOS/windows, native linux/arm64 smoke, race+coverage floor on ubuntu, plus linux/darwin/windows × amd64/arm64 cross-builds. Ubuntu is the full suite; Windows/macOS/arm64 use `go test -short` so wall-clock stays on the ubuntu race job.
 
 ## Kubernetes snapshot
 

@@ -78,8 +78,12 @@ func TestWritePackLabeledServiceHashStableFromScratch(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	n := 25
+	if testing.Short() {
+		n = 3
+	}
 	var first string
-	for i := 0; i < 25; i++ {
+	for i := 0; i < n; i++ {
 		dir := t.TempDir()
 		if err := ingest.WritePack(s, now, dir); err != nil {
 			t.Fatal(err)

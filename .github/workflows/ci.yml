@@ -1,6 +1,9 @@
 name: ci
 
-# Fast parallel quality gates. Wall-clock target: ~2-3 minutes on cache hits.
+# Fast parallel quality gates. Wall-clock is the slowest job, not the sum.
+# Ubuntu runs the full suite (race + 21-loop prove + module-graph rebuilds).
+# Windows/macOS/arm64 use -short: same OS contracts, skip Linux-only burn.
+# Target: ~3 minutes on cache hits (ubuntu race is the floor).
 # Required aggregator job: "all checks passed".
 # Tag pushes are owned by release.yml (skip here to avoid duplicate runners).
 
@@ -28,7 +31,7 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -146,6 +149,26 @@ jobs:
           test -f fixtures/fleet_healthy/expected/ask_api.json
           test -f fixtures/fleet_healthy/expected/verify_api.json
           sum "| fixture hygiene | ok |"
+      # PowerShell analysis does not need a Windows runner. Keep it off the
+      # Windows test job so gallery install cannot pad the critical path.
+      - name: PSScriptAnalyzer (installers)
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          $errs = @()
+          foreach ($f in @('scripts/install.ps1', 'scripts/verify.ps1')) {
+            $findings = Invoke-ScriptAnalyzer -Path $f -Severity @('Error', 'Warning') -ExcludeRule @(
+              'PSAvoidUsingWriteHost',
+              'PSUseShouldProcessForStateChangingFunctions',
+              'PSUseBOMForUnicodeEncodedFile',
+              'PSAvoidUsingEmptyCatchBlock'
+            )
+            if ($findings) {
+              $findings | Format-Table -AutoSize | Out-String | Write-Host
+              $errs += $findings
+            }
+          }
+          if ($errs.Count -gt 0) { throw "PSScriptAnalyzer reported $($errs.Count) finding(s)" }
 
   staticcheck:
     name: staticcheck
@@ -173,7 +196,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -215,9 +238,9 @@ jobs:
             ARM64) echo "$meta" | grep -F "GOARCH=arm64" >/dev/null ;;
             *) echo "unsupported RUNNER_ARCH=${RUNNER_ARCH}" >&2; exit 1 ;;
           esac
-      - name: Unit tests (shuffle)
+      - name: Unit tests (shuffle, short)
         if: ${{ !matrix.race }}
-        run: go test -count=1 -timeout=10m -shuffle=on -fullpath ./...
+        run: go test -count=1 -timeout=4m -short -shuffle=on -fullpath ./...
       - name: Unit tests (race + shuffle + cover)
         if: ${{ matrix.race && matrix.os == 'ubuntu-24.04' }}
         env:
@@ -260,11 +283,6 @@ jobs:
             cover-func.txt
           if-no-files-found: ignore
           retention-days: 7
-      - name: Unit tests (race + shuffle)
-        if: ${{ matrix.race && matrix.os != 'ubuntu-24.04' }}
-        env:
-          CGO_ENABLED: "1"
-        run: go test -count=1 -timeout=10m -race -shuffle=on ./...
       - name: Fixture / golden + demo
         shell: bash
         run: |
@@ -604,25 +622,6 @@ jobs:
           INSTALL_REL="$(mktemp -d)"
           OPSGRAPH_RELEASE_DIR="$REL" OPSGRAPH_VERSION="$REL_VERSION" OPSGRAPH_INSTALL_DIR="$INSTALL_REL" ./scripts/install.sh
           "$INSTALL_REL/opsgraph" version
-      - name: PSScriptAnalyzer (windows installers)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
-          $errs = @()
-          foreach ($f in @('scripts/install.ps1', 'scripts/verify.ps1')) {
-            $findings = Invoke-ScriptAnalyzer -Path $f -Severity @('Error', 'Warning') -ExcludeRule @(
-              'PSAvoidUsingWriteHost',
-              'PSUseShouldProcessForStateChangingFunctions',
-              'PSUseBOMForUnicodeEncodedFile',
-              'PSAvoidUsingEmptyCatchBlock'
-            )
-            if ($findings) {
-              $findings | Format-Table -AutoSize | Out-String | Write-Host
-              $errs += $findings
-            }
-          }
-          if ($errs.Count -gt 0) { throw "PSScriptAnalyzer reported $($errs.Count) finding(s)" }
       - name: install.ps1 from local dist + release zip (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -777,7 +776,7 @@ jobs:
   arm64-smoke:
     name: linux/arm64 smoke
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 15
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -788,7 +787,7 @@ jobs:
           set -euo pipefail
           test "$(go env GOARCH)" = "arm64"
           go build -trimpath -ldflags="-s -w -buildid=" -o bin/opsgraph ./cmd/opsgraph
-          go test -count=1 -timeout=10m -shuffle=on ./...
+          go test -count=1 -timeout=3m -short -shuffle=on ./...
           ./bin/opsgraph test ./fixtures/incident_checkout
           ./bin/opsgraph validate-fixture ./fixtures/fleet_healthy
           JA=(go run ./scripts/jsonassert.go)
