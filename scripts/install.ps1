@@ -135,7 +135,7 @@ try {
     # Windows locks running executables; stage beside and instruct replace.
     $staged = Join-Path $InstallDir "opsgraph.exe.new"
     Copy-Item $bin $staged -Force
-    throw "could not replace $dest (is opsgraph running?). Staged as $staged — stop the process and rename it to opsgraph.exe"
+    throw "could not replace $dest (is opsgraph running?). Staged as $staged - stop the process and rename it to opsgraph.exe"
   }
   Write-Host "installed $dest"
   $normInstall = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
