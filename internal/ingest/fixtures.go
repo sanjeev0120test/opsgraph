@@ -3,6 +3,7 @@ package ingest
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"time"
 
 	"github.com/sanjeev0120test/opsgraph/internal/model"
@@ -196,17 +197,21 @@ func ingestDeps(s *store.Store, fsys fs.FS, rowSource string) error {
 		return err
 	}
 	for _, v := range f.Dependencies {
+		from, to := strings.TrimSpace(v.From), strings.TrimSpace(v.To)
+		if from == "" || to == "" {
+			continue
+		}
 		src := v.Source
 		if src == "" {
 			src = rowSource
 		}
-		for _, id := range []string{v.From, v.To} {
+		for _, id := range []string{from, to} {
 			if err := ensureServiceStub(s, id); err != nil {
 				return err
 			}
 		}
 		if err := s.UpsertDependency(model.Dependency{
-			FromServiceID: v.From, ToServiceID: v.To, Type: v.Type, Source: src,
+			FromServiceID: from, ToServiceID: to, Type: v.Type, Source: src,
 		}); err != nil {
 			return err
 		}

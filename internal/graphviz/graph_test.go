@@ -68,3 +68,28 @@ func TestMermaidEscapesQuotesAndIsStable(t *testing.T) {
 		t.Fatalf("expected escaped edge label: %s", a)
 	}
 }
+
+func TestSortedDepsIncludesTypeAndSkipsEmpty(t *testing.T) {
+	svcs := []model.Service{{ID: "a"}, {ID: "b"}}
+	deps := []model.Dependency{
+		{FromServiceID: "a", ToServiceID: "b", Type: "grpc"},
+		{FromServiceID: "", ToServiceID: "b", Type: "http"},
+		{FromServiceID: "a", ToServiceID: "b", Type: "http"},
+	}
+	ascii1 := ASCII(svcs, deps)
+	ascii2 := ASCII(svcs, []model.Dependency{deps[2], deps[0], deps[1]})
+	if ascii1 != ascii2 {
+		t.Fatalf("ascii type order not stable:\n%s\n---\n%s", ascii1, ascii2)
+	}
+	if !strings.Contains(ascii1, "(http)") || strings.Index(ascii1, "(grpc)") > strings.Index(ascii1, "(http)") {
+		t.Fatalf("want grpc before http, got %s", ascii1)
+	}
+	if strings.Contains(ascii1, "[] →") {
+		t.Fatalf("empty endpoint leaked: %s", ascii1)
+	}
+	m1 := Mermaid(svcs, deps)
+	m2 := Mermaid(svcs, []model.Dependency{deps[2], deps[0], deps[1]})
+	if m1 != m2 {
+		t.Fatalf("mermaid type order not stable:\n%s\n---\n%s", m1, m2)
+	}
+}

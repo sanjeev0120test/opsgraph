@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sanjeev0120test/opsgraph/internal/impact"
 	"github.com/sanjeev0120test/opsgraph/internal/ingest"
 	"github.com/sanjeev0120test/opsgraph/internal/model"
 	"github.com/sanjeev0120test/opsgraph/internal/output"
@@ -72,12 +73,19 @@ func newValidateFixtureCmd() *cobra.Command {
 			}
 			var synthTargets []string
 			for _, d := range depPairs {
-				if !declared[d.from] {
-					return fail(1, "dependency from undeclared service %q (add it to services.yaml)", d.from)
+				from, to := strings.TrimSpace(d.from), strings.TrimSpace(d.to)
+				if from == "" || to == "" {
+					return fail(1, "dependency has empty from or to")
 				}
-				if !declared[d.to] {
-					synthTargets = append(synthTargets, d.to)
-					warn("dependency target " + d.to + " not in services.yaml (will be synthesized as unknown)")
+				if from == to {
+					warn("self-loop " + from + " → " + from)
+				}
+				if !declared[from] {
+					return fail(1, "dependency from undeclared service %q (add it to services.yaml)", from)
+				}
+				if !declared[to] {
+					synthTargets = append(synthTargets, to)
+					warn("dependency target " + to + " not in services.yaml (will be synthesized as unknown)")
 				}
 			}
 
@@ -155,6 +163,13 @@ func newValidateFixtureCmd() *cobra.Command {
 				if _, err := s.GetEvidence(a.EvidenceID); err != nil {
 					return fail(1, "alert %q cites missing evidence %q", a.ID, a.EvidenceID)
 				}
+			}
+			storeDeps, err := s.ListAllDependencies()
+			if err != nil {
+				return fail(2, "%v", err)
+			}
+			for _, cyc := range impact.Cycles(storeDeps) {
+				warn("dependency cycle " + strings.Join(cyc, " → "))
 			}
 			payload := struct {
 				OK       bool           `json:"ok"`

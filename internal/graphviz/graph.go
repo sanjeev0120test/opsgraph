@@ -40,16 +40,7 @@ func JSONGraph(services []model.Service, deps []model.Dependency) Graph {
 		}
 		nodes = append(nodes, Node{ID: s.ID, Health: h})
 	}
-	sorted := append([]model.Dependency(nil), deps...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].FromServiceID != sorted[j].FromServiceID {
-			return sorted[i].FromServiceID < sorted[j].FromServiceID
-		}
-		if sorted[i].ToServiceID != sorted[j].ToServiceID {
-			return sorted[i].ToServiceID < sorted[j].ToServiceID
-		}
-		return sorted[i].Type < sorted[j].Type
-	})
+	sorted := sortedDeps(deps)
 	edges := make([]Edge, 0, len(sorted))
 	for _, d := range sorted {
 		edges = append(edges, Edge{From: d.FromServiceID, To: d.ToServiceID, Type: d.Type})
@@ -73,13 +64,7 @@ func ASCII(services []model.Service, deps []model.Dependency) string {
 		b.WriteString("(no edges)\n")
 		return b.String()
 	}
-	sorted := append([]model.Dependency(nil), deps...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].FromServiceID != sorted[j].FromServiceID {
-			return sorted[i].FromServiceID < sorted[j].FromServiceID
-		}
-		return sorted[i].ToServiceID < sorted[j].ToServiceID
-	})
+	sorted := sortedDeps(deps)
 	for _, d := range sorted {
 		fh, th := health[d.FromServiceID], health[d.ToServiceID]
 		if fh == "" {
@@ -105,13 +90,7 @@ func Mermaid(services []model.Service, deps []model.Dependency) string {
 		label := mermaidEscape(s.ID) + `\n` + mermaidEscape(s.Health)
 		fmt.Fprintf(&b, "  %s[\"%s\"]\n", safeID(s.ID), label)
 	}
-	sorted := append([]model.Dependency(nil), deps...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].FromServiceID != sorted[j].FromServiceID {
-			return sorted[i].FromServiceID < sorted[j].FromServiceID
-		}
-		return sorted[i].ToServiceID < sorted[j].ToServiceID
-	})
+	sorted := sortedDeps(deps)
 	for _, d := range sorted {
 		if !seen[d.FromServiceID] {
 			fmt.Fprintf(&b, "  %s[\"%s\"]\n", safeID(d.FromServiceID), mermaidEscape(d.FromServiceID))
@@ -147,6 +126,26 @@ func safeID(id string) string {
 		}
 	}
 	return b.String()
+}
+
+func sortedDeps(deps []model.Dependency) []model.Dependency {
+	sorted := make([]model.Dependency, 0, len(deps))
+	for _, d := range deps {
+		if strings.TrimSpace(d.FromServiceID) == "" || strings.TrimSpace(d.ToServiceID) == "" {
+			continue
+		}
+		sorted = append(sorted, d)
+	}
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].FromServiceID != sorted[j].FromServiceID {
+			return sorted[i].FromServiceID < sorted[j].FromServiceID
+		}
+		if sorted[i].ToServiceID != sorted[j].ToServiceID {
+			return sorted[i].ToServiceID < sorted[j].ToServiceID
+		}
+		return sorted[i].Type < sorted[j].Type
+	})
+	return sorted
 }
 
 func mermaidEscape(s string) string {

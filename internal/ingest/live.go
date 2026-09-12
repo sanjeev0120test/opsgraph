@@ -231,6 +231,10 @@ func seedFromConfig(s *store.Store, cfg *config.Config, configDir string) error 
 			return err
 		}
 		for _, dep := range sc.DependsOn {
+			dep = strings.TrimSpace(dep)
+			if dep == "" || dep == id {
+				continue
+			}
 			if err := ensureServiceStub(s, dep); err != nil {
 				return err
 			}

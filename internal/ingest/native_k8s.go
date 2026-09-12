@@ -312,13 +312,9 @@ func nativeToEvent(o nativeObject) (k8sEvent, bool) {
 	if strings.TrimSpace(ref.Name) == "" {
 		ref = o.Regarding
 	}
-	kind := ref.Kind
-	name := ref.Name
-	if strings.TrimSpace(name) == "" {
-		name = o.Metadata.Name
-		kind = o.Kind
-	}
-	sid := inferServiceID(kind, name, o.Metadata.Labels)
+	// Labels may still map an event with no object ref. Event metadata.name
+	// (checkout.17f8c) must never become a service id.
+	sid := inferServiceID(ref.Kind, ref.Name, o.Metadata.Labels)
 	if sid == "" {
 		return k8sEvent{}, false
 	}

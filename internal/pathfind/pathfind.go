@@ -4,6 +4,7 @@ package pathfind
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/sanjeev0120test/opsgraph/internal/model"
 )
@@ -19,12 +20,20 @@ type Path struct {
 // Shortest finds the shortest depends-on path from → to (BFS).
 // Direction follows dependency edges: walker moves From → To.
 func Shortest(deps []model.Dependency, from, to string) (Path, error) {
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	if from == "" || to == "" {
+		return Path{}, fmt.Errorf("path requires non-empty service ids")
+	}
 	if from == to {
 		return Path{From: from, To: to, Nodes: []string{from}, Hops: 0}, nil
 	}
 	adj := map[string][]string{}
 	for _, d := range deps {
-		adj[d.FromServiceID] = append(adj[d.FromServiceID], d.ToServiceID)
+		f, t := strings.TrimSpace(d.FromServiceID), strings.TrimSpace(d.ToServiceID)
+		if f == "" || t == "" {
+			continue
+		}
+		adj[f] = append(adj[f], t)
 	}
 	for k := range adj {
 		sort.Strings(adj[k])

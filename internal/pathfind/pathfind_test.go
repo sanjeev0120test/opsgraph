@@ -31,3 +31,33 @@ func TestNoPath(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestShortestThroughCycle(t *testing.T) {
+	deps := []model.Dependency{
+		{FromServiceID: "a", ToServiceID: "b"},
+		{FromServiceID: "b", ToServiceID: "c"},
+		{FromServiceID: "c", ToServiceID: "a"},
+		{FromServiceID: "", ToServiceID: "b"},
+	}
+	var first pathfind.Path
+	for i := 0; i < 100; i++ {
+		p, err := pathfind.Shortest(deps, "a", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Hops != 2 || p.Nodes[0] != "a" || p.Nodes[2] != "c" {
+			t.Fatalf("iter %d: %+v", i, p)
+		}
+		if first.Nodes == nil {
+			first = p
+		} else if p.Hops != first.Hops || p.Nodes[1] != first.Nodes[1] {
+			t.Fatalf("nondeterministic: %+v vs %+v", first, p)
+		}
+	}
+}
+
+func TestShortestEmptyIDs(t *testing.T) {
+	if _, err := pathfind.Shortest(nil, "", "a"); err == nil {
+		t.Fatal("empty from must fail")
+	}
+}

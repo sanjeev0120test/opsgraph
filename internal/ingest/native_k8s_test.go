@@ -249,6 +249,28 @@ func TestIngestEventsK8sV1EvidenceOnService(t *testing.T) {
 	}
 }
 
+func TestParseEventWithoutObjectRefDoesNotInventService(t *testing.T) {
+	orphan := []byte("" +
+		"apiVersion: events.k8s.io/v1\nkind: Event\nmetadata:\n  name: checkout.17f8c\n  namespace: shop\nreason: Unhealthy\nnote: dropped\n")
+	_, evs, _, err := parseNativeK8s(orphan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.Events) != 0 {
+		t.Fatalf("metadata.name must not become a service: %+v", evs.Events)
+	}
+
+	labeled := []byte("" +
+		"apiVersion: events.k8s.io/v1\nkind: Event\nmetadata:\n  name: checkout.17f8c\n  labels:\n    app: checkout\nnote: labeled\n")
+	_, evs, _, err = parseNativeK8s(labeled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.Events) != 1 || evs.Events[0].ServiceID != "checkout" {
+		t.Fatalf("label-only event should map to checkout: %+v", evs.Events)
+	}
+}
+
 func TestParseNativeMultiDoc(t *testing.T) {
 	data := []byte("" +
 		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: a\n  labels:\n    app: a\nspec:\n  replicas: 1\nstatus:\n  readyReplicas: 1\n" +
