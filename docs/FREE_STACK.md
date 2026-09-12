@@ -5,7 +5,7 @@ keys, paid SaaS connectors, or required cloud services.
 
 | Layer | Choice | Notes |
 |-------|--------|-------|
-| Language | Go 1.25+ | Static binary, `CGO_ENABLED=0` |
+| Language | Go 1.26+ | Static binary, `CGO_ENABLED=0` |
 | CLI | cobra | Pure Go |
 | Store | modernc.org/sqlite | Pure Go SQLite |
 | Git | go-git | Local repo only |

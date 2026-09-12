@@ -1,6 +1,6 @@
 module github.com/sanjeev0120test/opsgraph
 
-go 1.25.14
+go 1.26.8
 
 require (
 	github.com/go-git/go-git/v5 v5.19.2
