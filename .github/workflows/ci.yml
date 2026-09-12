@@ -444,13 +444,8 @@ jobs:
           "$BIN" test ./fixtures/incident_checkout --format json | "${JA[@]}" true:ok has:checked has:files
           "$BIN" why checkout --fixture ./fixtures/incident_checkout --format json | "${JA[@]}" has:why has:health has:score has:fingerprint
           "$BIN" score checkout --fixture ./fixtures/incident_checkout --format json | "${JA[@]}" has:service has:score has:level eq:level=critical eq:service=checkout gte:score=80
-          "$BIN" path checkout-api auth --fixture ./fixtures/incident_checkout --format json | "${JA[@]}" has:from has:to has:nodes eq:from=checkout eq:to=auth true:ok true:found
-          set +e
-          PATH_MISS="$("$BIN" path auth order --fixture ./fixtures/incident_checkout --format json)"
-          path_miss=$?
-          set -e
-          test "$path_miss" -eq 1
-          echo "$PATH_MISS" | "${JA[@]}" false:ok false:found eq:from=auth eq:to=order
+          "$BIN" path checkout-api auth --fixture ./fixtures/incident_checkout --format json | "${JA[@]}" has:from has:to has:nodes eq:from=checkout eq:to=auth eq:direction=depends_on true:ok true:found
+          "$BIN" path auth order --fixture ./fixtures/incident_checkout --format json | "${JA[@]}" has:from has:to has:nodes eq:from=auth eq:to=order eq:direction=dependents true:ok true:found
           "$BIN" watch order --fixture ./fixtures/incident_checkout --once --format json | "${JA[@]}" true:ok has:healthy true:healthy eq:service=order
           "$BIN" evidence --fixture ./fixtures/incident_checkout --format json --limit 1 | "${JA[@]}" has:evidence has:total gte:total=1
           EXP_META="$(mktemp -d)"

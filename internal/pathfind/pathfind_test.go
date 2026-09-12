@@ -70,6 +70,16 @@ func TestShortestAnyReverseDependents(t *testing.T) {
 	}
 }
 
+func TestShortestAnyStillMissesDisconnected(t *testing.T) {
+	deps := []model.Dependency{
+		{FromServiceID: "order", ToServiceID: "checkout"},
+		{FromServiceID: "payments", ToServiceID: "ledger"},
+	}
+	if _, err := pathfind.ShortestAny(deps, "checkout", "ledger"); err == nil {
+		t.Fatal("disconnected components must still miss")
+	}
+}
+
 func TestShortestEmptyIDs(t *testing.T) {
 	if _, err := pathfind.Shortest(nil, "", "a"); err == nil {
 		t.Fatal("empty from must fail")
