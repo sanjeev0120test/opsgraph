@@ -49,6 +49,14 @@ connectors:
     # Optional: local Alertmanager /api/v2/alerts (disabled by default; mocked in tests).
     enabled: false
     url: http://127.0.0.1:9093
+  plugins:
+    # Local commands that print opsgraph pack YAML on stdout. Never discovered
+    # from PATH: only entries listed here run. Accepted sections:
+    # services, owners, changes, dependencies, alerts.
+    # - name: deploys
+    #   command: ["./bin/opsgraph-deploys"]
+    #   enabled: true
+    #   timeout: 10s
 
 ai:
   enabled: false

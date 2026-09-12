@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -52,11 +53,22 @@ type OwnerConfig struct {
 
 // Connectors toggles and configures data sources.
 type Connectors struct {
-	Fixtures     ToggledConnector `yaml:"fixtures"`
-	Git          GitConnector     `yaml:"git"`
-	Kubernetes   K8sConnector     `yaml:"kubernetes"`
-	Prometheus   URLConnector     `yaml:"prometheus"`
-	Alertmanager URLConnector     `yaml:"alertmanager"`
+	Fixtures     ToggledConnector  `yaml:"fixtures"`
+	Git          GitConnector      `yaml:"git"`
+	Kubernetes   K8sConnector      `yaml:"kubernetes"`
+	Prometheus   URLConnector      `yaml:"prometheus"`
+	Alertmanager URLConnector      `yaml:"alertmanager"`
+	Plugins      []PluginConnector `yaml:"plugins"`
+}
+
+// PluginConnector runs a local command that prints opsgraph pack YAML on
+// stdout. It is the extension point for signals opsgraph has no connector for.
+// Commands are never discovered automatically: only what is listed here runs.
+type PluginConnector struct {
+	Name    string   `yaml:"name"`
+	Command []string `yaml:"command"`
+	Enabled bool     `yaml:"enabled"`
+	Timeout string   `yaml:"timeout"`
 }
 
 // ToggledConnector is a connector with only an enabled flag.
@@ -196,7 +208,57 @@ func (c *Config) validate() error {
 			return fmt.Errorf("invalid ai.timeout %q: must be > 0", c.AI.Timeout)
 		}
 	}
+	if err := c.validatePlugins(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// DefaultPluginTimeout bounds a single plugin run.
+const DefaultPluginTimeout = 30 * time.Second
+
+// validatePlugins rejects plugin entries that could not run, so a typo fails at
+// load time instead of midway through an incident.
+func (c *Config) validatePlugins() error {
+	seen := map[string]bool{}
+	for i, p := range c.Connectors.Plugins {
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			return fmt.Errorf("connectors.plugins[%d]: name is required", i)
+		}
+		if seen[name] {
+			return fmt.Errorf("connectors.plugins: duplicate name %q", name)
+		}
+		seen[name] = true
+		if p.Enabled && len(p.Command) == 0 {
+			return fmt.Errorf("connectors.plugins[%s]: command is required when enabled", name)
+		}
+		if len(p.Command) > 0 && strings.TrimSpace(p.Command[0]) == "" {
+			return fmt.Errorf("connectors.plugins[%s]: command[0] is empty", name)
+		}
+		if p.Timeout != "" {
+			d, err := time.ParseDuration(p.Timeout)
+			if err != nil {
+				return fmt.Errorf("connectors.plugins[%s]: invalid timeout %q: %w", name, p.Timeout, err)
+			}
+			if d <= 0 {
+				return fmt.Errorf("connectors.plugins[%s]: invalid timeout %q: must be > 0", name, p.Timeout)
+			}
+		}
+	}
+	return nil
+}
+
+// PluginTimeout parses the plugin's timeout, defaulting to DefaultPluginTimeout.
+func (p PluginConnector) PluginTimeout() time.Duration {
+	if p.Timeout == "" {
+		return DefaultPluginTimeout
+	}
+	d, err := time.ParseDuration(p.Timeout)
+	if err != nil || d <= 0 {
+		return DefaultPluginTimeout
+	}
+	return d
 }
 
 // Since parses default_since, falling back to DefaultSince on empty.

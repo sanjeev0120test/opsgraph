@@ -118,6 +118,10 @@ func newStatusCmd() *cobra.Command {
 						Detail:    cfg.Connectors.Alertmanager.URL,
 						Reachable: boolPtr(amOK),
 					},
+					"plugins": {
+						Enabled: pluginEnabledCount(cfg.Connectors.Plugins) > 0,
+						Detail:  pluginEnabledNames(cfg.Connectors.Plugins),
+					},
 				},
 				AI: map[string]any{
 					"enabled":   cfg.AI.Enabled,
@@ -154,6 +158,11 @@ func newStatusCmd() *cobra.Command {
 					cmd.Printf(" reachable=%v", amOK)
 				}
 				cmd.Printf(")\n")
+				if n := pluginEnabledCount(cfg.Connectors.Plugins); n > 0 {
+					cmd.Printf("  plugins:      %d enabled (%s)\n", n, pluginEnabledNames(cfg.Connectors.Plugins))
+				} else {
+					cmd.Printf("  plugins:      0 enabled\n")
+				}
 				cmd.Printf("AI\n  enabled: %v  model: %s  embed: %s  url: %s  reachable: %v\n",
 					cfg.AI.Enabled, cfg.AI.Model, cfg.AI.EmbedModel, cfg.AI.OllamaURL, ollamaOK)
 			}

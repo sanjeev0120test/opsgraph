@@ -131,6 +131,54 @@ owners:
 	}
 }
 
+func TestLoadRejectsPluginWithoutName(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "plugin.yaml")
+	body := "connectors:\n  plugins:\n    - command: [echo]\n      enabled: true\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("plugin without a name must fail at load")
+	}
+}
+
+func TestLoadRejectsEnabledPluginWithoutCommand(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "plugin.yaml")
+	body := "connectors:\n  plugins:\n    - name: deploys\n      enabled: true\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("enabled plugin without a command must fail at load")
+	}
+}
+
+func TestLoadAcceptsDisabledPluginWithoutCommand(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "plugin.yaml")
+	body := "connectors:\n  plugins:\n    - name: deploys\n      enabled: false\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("disabled plugin is a stub, not an error: %v", err)
+	}
+	if len(cfg.Connectors.Plugins) != 1 || cfg.Connectors.Plugins[0].Name != "deploys" {
+		t.Fatalf("plugins: %+v", cfg.Connectors.Plugins)
+	}
+}
+
+func TestPluginTimeoutDefault(t *testing.T) {
+	p := PluginConnector{}
+	if p.PluginTimeout() != DefaultPluginTimeout {
+		t.Fatalf("default = %v", p.PluginTimeout())
+	}
+	p.Timeout = "5s"
+	if p.PluginTimeout() != 5*time.Second {
+		t.Fatalf("override = %v", p.PluginTimeout())
+	}
+}
+
 func TestAITimeoutDefaultsAndOverride(t *testing.T) {
 	cfg := Default()
 	if cfg.AITimeout() != 20*time.Second {

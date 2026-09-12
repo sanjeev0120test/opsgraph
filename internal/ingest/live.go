@@ -108,7 +108,11 @@ func LiveIngest(ctx context.Context, s *store.Store, cfg *config.Config, configD
 			return err
 		}
 	}
-	return nil
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Plugins run last so site-specific data wins over inferred topology.
+	return RunPlugins(ctx, s, cfg.Connectors.Plugins, resolvePluginWorkDir(configDir))
 }
 
 func ingestGitAndRunbooks(s *store.Store, cfg *config.Config, configDir string, since, now time.Time) error {
