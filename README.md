@@ -93,51 +93,53 @@ to see a real answer, on Windows or macOS.
 ```bash
 git clone https://github.com/sanjeev0120test/opsgraph.git
 cd opsgraph
+go build -o bin/opsgraph ./cmd/opsgraph   # Windows: bin\opsgraph.exe
 ```
+
+Use `./bin/opsgraph` below (`.\bin\opsgraph.exe` on Windows). `go run ./cmd/opsgraph …` is the same if you skip the build.
 
 **1. Prove the engine (offline, no cluster, no account)**
 
 ```bash
-go run ./cmd/opsgraph prove
+./bin/opsgraph prove
 ```
 
-Expect `ok`, service `checkout`, and a SHA-256. Same hash on any OS.
+Expect `ok`, service `checkout`, and a SHA-256. That hash is the trust check: CI
+asserts the same bytes on ubuntu, macOS, and Windows.
 
 **2. Walk the built-in incident**
 
 ```bash
-go run ./cmd/opsgraph demo
-go run ./cmd/opsgraph ask checkout --fixture fixtures/incident_checkout
+./bin/opsgraph demo
+./bin/opsgraph ask checkout --fixture fixtures/incident_checkout
+./bin/opsgraph pack --fixture fixtures/incident_checkout
+./bin/opsgraph test incident.opsgraph
+./bin/opsgraph receipt incident.opsgraph
 ```
 
-**3. Use your cluster (read-only dump)**
+`pack` with no `--fixture` only works when the current directory already has a
+dump or a config. From a fresh clone, pass the fixture (or dump YAML first).
+
+**3. Optional: your cluster (read-only dump)**
 
 ```bash
 kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
-go run ./cmd/opsgraph ask
+./bin/opsgraph ask
+./bin/opsgraph pack --force
 ```
 
 `ask` with no name picks the hottest service. StatefulSets and DaemonSets are
 first-class: `postgres` at 0/3 ready is `unhealthy`, not "service not found".
 
-**4. Share**
-
-```bash
-go run ./cmd/opsgraph pack
-go run ./cmd/opsgraph test incident.opsgraph
-go run ./cmd/opsgraph receipt incident.opsgraph
-```
-
-Windows (PowerShell) is the same commands; `go run` does not need make.
-
 ## Installation
 
 Skip this until the quick start worked, unless you want `opsgraph` on PATH.
 
-**From source (current `main`, recommended until you pin a release):**
+**From source (tip of `main` — `@latest` is the newest *tag*, often older):**
 
 ```bash
-go install github.com/sanjeev0120test/opsgraph/cmd/opsgraph@latest
+go install github.com/sanjeev0120test/opsgraph/cmd/opsgraph@main
+# Binary lands in $(go env GOPATH)/bin — add that to PATH if `opsgraph` is not found.
 opsgraph prove
 ```
 
@@ -318,7 +320,7 @@ docs/             USAGE, ARCHITECTURE, RUNBOOK_FORMAT
 | `service not found` | Dump includes that workload kind? Label / name inference? |
 | Empty fleet | `doctor`; dump kinds listed on stderr? |
 | `pack` replay failed | Update to a build that goldens the pack itself (not the live store) |
-| Installer missing commands | You installed a tag older than those commands; use `go install @latest` or a newer tag |
+| Installer missing commands | That tag is older than the commands; use `go install …@main` or a newer tag |
 | Prom/AM empty answers | Scrape failed → fallback store; or `--data-dir` |
 | Plugin "unknown section" | Only the five pack keys; no `deployments:` |
 | `prove` hash drifted | Only happens if pack bytes change; CI freezes the hash |
@@ -338,7 +340,8 @@ automation surfaces.
 - Config `version: 1` is current. Extra keys are ignored.
 - Schema: store opens with `PRAGMA user_version`; v1→v2 is automatic.
 - Pack files from older builds still `open` / `test` if goldens match.
-- Pin a release tag in installers. Tip-of-tree is `go install …@latest`.
+- Pin a release tag in installers. Tip of `main` is `go install …@main`.
+  `go install …@latest` is the highest semver tag, not the branch.
 
 ## Can I trust it?
 
