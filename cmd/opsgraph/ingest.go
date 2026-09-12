@@ -71,7 +71,7 @@ func newIngestCmd() *cobra.Command {
 				lookback = cfg.Since()
 			}
 
-			now := time.Now().UTC()
+			now := nowUTC()
 			liveClock := false
 			switch {
 			case fixture != "":

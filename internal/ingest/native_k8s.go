@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,9 +45,12 @@ type nativeDepSpec struct {
 }
 
 type nativeDepStatus struct {
-	Replicas      int               `yaml:"replicas"`
-	ReadyReplicas int               `yaml:"readyReplicas"`
-	Conditions    []nativeCondition `yaml:"conditions"`
+	Replicas      int `yaml:"replicas"`
+	ReadyReplicas int `yaml:"readyReplicas"`
+	// DaemonSets have no spec.replicas; readiness is counted per scheduled node.
+	DesiredNumberScheduled int               `yaml:"desiredNumberScheduled"`
+	NumberReady            int               `yaml:"numberReady"`
+	Conditions             []nativeCondition `yaml:"conditions"`
 }
 
 type nativeCondition struct {
@@ -62,16 +66,79 @@ type nativeObjectRef struct {
 	Namespace string `yaml:"namespace"`
 }
 
-func loadK8sSnapshot(fsys fs.FS, depFile, evFile string) (k8sDeployments, k8sEvents, error) {
+func normalizeKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
+}
+
+// isWorkloadKind reports kinds that carry replica health. Deployments cover
+// stateless apps, StatefulSets cover datastores and queues, DaemonSets cover
+// per-node agents. Dropping any of them hides an outage behind "service not found".
+func isWorkloadKind(kind string) bool {
+	switch normalizeKind(kind) {
+	case "deployment", "statefulset", "daemonset":
+		return true
+	}
+	return false
+}
+
+// k8sSnapshotStats records what a native dump actually contained, so a snapshot
+// that yields no workloads can explain itself instead of looking like a healthy fleet.
+type k8sSnapshotStats struct {
+	Native bool
+	Kinds  map[string]int
+}
+
+func (s *k8sSnapshotStats) observe(kind string) {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return
+	}
+	if s.Kinds == nil {
+		s.Kinds = map[string]int{}
+	}
+	s.Kinds[kind]++
+}
+
+func (s *k8sSnapshotStats) merge(other k8sSnapshotStats) {
+	if other.Native {
+		s.Native = true
+	}
+	for kind, n := range other.Kinds {
+		if s.Kinds == nil {
+			s.Kinds = map[string]int{}
+		}
+		s.Kinds[kind] += n
+	}
+}
+
+// summary renders "CronJob x2, Service x3", sorted so diagnostics stay stable.
+func (s k8sSnapshotStats) summary() string {
+	if len(s.Kinds) == 0 {
+		return "no objects"
+	}
+	names := make([]string, 0, len(s.Kinds))
+	for kind := range s.Kinds {
+		names = append(names, kind)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, kind := range names {
+		parts = append(parts, fmt.Sprintf("%s x%d", kind, s.Kinds[kind]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func loadK8sSnapshot(fsys fs.FS, depFile, evFile string) (k8sDeployments, k8sEvents, k8sSnapshotStats, error) {
 	var deps k8sDeployments
 	var evs k8sEvents
+	var stats k8sSnapshotStats
 	seen := map[string]bool{}
 	appendFile := func(name string) error {
 		if name == "" || seen[name] {
 			return nil
 		}
 		seen[name] = true
-		d, e, found, err := loadK8sFile(fsys, name)
+		d, e, st, found, err := loadK8sFile(fsys, name)
 		if err != nil {
 			return err
 		}
@@ -80,42 +147,43 @@ func loadK8sSnapshot(fsys fs.FS, depFile, evFile string) (k8sDeployments, k8sEve
 		}
 		deps.Deployments = append(deps.Deployments, d.Deployments...)
 		evs.Events = append(evs.Events, e.Events...)
+		stats.merge(st)
 		return nil
 	}
 	if err := appendFile(depFile); err != nil {
-		return k8sDeployments{}, k8sEvents{}, err
+		return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, err
 	}
 	if err := appendFile(evFile); err != nil {
-		return k8sDeployments{}, k8sEvents{}, err
+		return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, err
 	}
 	fillMissingDeploymentServiceIDs(&deps)
-	return deps, evs, nil
+	return deps, evs, stats, nil
 }
 
-func loadK8sFile(fsys fs.FS, name string) (k8sDeployments, k8sEvents, bool, error) {
+func loadK8sFile(fsys fs.FS, name string) (k8sDeployments, k8sEvents, k8sSnapshotStats, bool, error) {
 	data, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return k8sDeployments{}, k8sEvents{}, false, nil
+			return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, false, nil
 		}
-		return k8sDeployments{}, k8sEvents{}, false, fmt.Errorf("read %s: %w", name, err)
+		return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, false, fmt.Errorf("read %s: %w", name, err)
 	}
 	if looksNativeK8s(data) {
-		d, e, err := parseNativeK8s(data)
+		d, e, st, err := parseNativeK8s(data)
 		if err != nil {
-			return k8sDeployments{}, k8sEvents{}, false, fmt.Errorf("parse native k8s %s: %w", name, err)
+			return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, false, fmt.Errorf("parse native k8s %s: %w", name, err)
 		}
-		return d, e, true, nil
+		return d, e, st, true, nil
 	}
 	var deps k8sDeployments
 	if err := yaml.Unmarshal(data, &deps); err != nil {
-		return k8sDeployments{}, k8sEvents{}, false, fmt.Errorf("parse %s: %w", name, err)
+		return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, false, fmt.Errorf("parse %s: %w", name, err)
 	}
 	var evs k8sEvents
 	if err := yaml.Unmarshal(data, &evs); err != nil {
-		return k8sDeployments{}, k8sEvents{}, false, fmt.Errorf("parse %s: %w", name, err)
+		return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, false, fmt.Errorf("parse %s: %w", name, err)
 	}
-	return deps, evs, true, nil
+	return deps, evs, k8sSnapshotStats{}, true, nil
 }
 
 func fillMissingDeploymentServiceIDs(deps *k8sDeployments) {
@@ -126,7 +194,7 @@ func fillMissingDeploymentServiceIDs(deps *k8sDeployments) {
 		if strings.TrimSpace(deps.Deployments[i].ServiceID) != "" {
 			continue
 		}
-		deps.Deployments[i].ServiceID = inferServiceID("Deployment", deps.Deployments[i].Name, nil)
+		deps.Deployments[i].ServiceID = inferServiceID(deps.Deployments[i].Kind, deps.Deployments[i].Name, nil)
 	}
 }
 
@@ -150,69 +218,86 @@ func looksNativeK8s(data []byte) bool {
 		if probe.Deployments != nil || probe.Events != nil {
 			return false
 		}
-		switch strings.ToLower(strings.TrimSpace(probe.Kind)) {
-		case "list", "deployment", "event":
+		kind := normalizeKind(probe.Kind)
+		if kind == "list" || kind == "event" || isWorkloadKind(kind) {
 			sawNative = true
 		}
 	}
 	return sawNative
 }
 
-func parseNativeK8s(data []byte) (k8sDeployments, k8sEvents, error) {
+func parseNativeK8s(data []byte) (k8sDeployments, k8sEvents, k8sSnapshotStats, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var deps k8sDeployments
 	var evs k8sEvents
+	stats := k8sSnapshotStats{Native: true}
 	for {
 		var obj nativeObject
 		if err := dec.Decode(&obj); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return k8sDeployments{}, k8sEvents{}, err
+			return k8sDeployments{}, k8sEvents{}, k8sSnapshotStats{}, err
 		}
-		collectNative(&deps, &evs, obj)
+		collectNative(&deps, &evs, &stats, obj)
 	}
-	return deps, evs, nil
+	return deps, evs, stats, nil
 }
 
-func collectNative(deps *k8sDeployments, evs *k8sEvents, obj nativeObject) {
-	switch strings.ToLower(strings.TrimSpace(obj.Kind)) {
-	case "list":
+func collectNative(deps *k8sDeployments, evs *k8sEvents, stats *k8sSnapshotStats, obj nativeObject) {
+	kind := normalizeKind(obj.Kind)
+	if kind != "list" {
+		stats.observe(strings.TrimSpace(obj.Kind))
+	}
+	switch {
+	case kind == "list":
 		for _, item := range obj.Items {
-			collectNative(deps, evs, item)
+			collectNative(deps, evs, stats, item)
 		}
-	case "deployment":
-		if d, ok := nativeToDeployment(obj); ok {
+	case isWorkloadKind(kind):
+		if d, ok := nativeToWorkload(obj); ok {
 			deps.Deployments = append(deps.Deployments, d)
 		}
-	case "event":
+	case kind == "event":
 		if e, ok := nativeToEvent(obj); ok {
 			evs.Events = append(evs.Events, e)
 		}
 	}
 }
 
-func nativeToDeployment(o nativeObject) (k8sDeployment, bool) {
+func nativeToWorkload(o nativeObject) (k8sDeployment, bool) {
 	name := strings.TrimSpace(o.Metadata.Name)
 	if name == "" {
 		return k8sDeployment{}, false
 	}
-	desired := 1
-	if o.Spec.Replicas != nil {
-		desired = *o.Spec.Replicas
-	}
+	kind := normalizeKind(o.Kind)
+	desired, ready := workloadReplicas(o, kind)
 	ns := strings.TrimSpace(o.Metadata.Namespace)
 	if ns == "" {
 		ns = "default"
 	}
 	return k8sDeployment{
+		Kind:      kind,
 		Name:      name,
 		Namespace: ns,
-		ServiceID: inferServiceID("Deployment", name, o.Metadata.Labels),
+		ServiceID: inferServiceID(o.Kind, name, o.Metadata.Labels),
 		Desired:   desired,
-		Ready:     o.Status.ReadyReplicas,
+		Ready:     ready,
 		UpdatedAt: deploymentUpdatedAt(o),
 	}, true
+}
+
+// workloadReplicas reads per-kind replica counters. DaemonSets have no
+// spec.replicas: readiness is counted against the nodes they schedule onto.
+func workloadReplicas(o nativeObject, kind string) (desired, ready int) {
+	if kind == "daemonset" {
+		return o.Status.DesiredNumberScheduled, o.Status.NumberReady
+	}
+	desired = 1
+	if o.Spec.Replicas != nil {
+		desired = *o.Spec.Replicas
+	}
+	return desired, o.Status.ReadyReplicas
 }
 
 func nativeToEvent(o nativeObject) (k8sEvent, bool) {
@@ -273,13 +358,32 @@ func inferServiceID(kind, name string, labels map[string]string) string {
 		}
 	}
 	name = strings.TrimSpace(name)
-	switch strings.ToLower(strings.TrimSpace(kind)) {
+	switch normalizeKind(kind) {
 	case "pod":
-		name = stripK8sHashSuffix(stripK8sHashSuffix(name))
+		stripped := stripK8sHashSuffix(stripK8sHashSuffix(name))
+		if stripped == name {
+			// No controller hash: StatefulSet pods are <name>-<ordinal>.
+			stripped = stripOrdinalSuffix(name)
+		}
+		name = stripped
 	case "replicaset":
 		name = stripK8sHashSuffix(name)
 	}
 	return name
+}
+
+// stripOrdinalSuffix drops the StatefulSet pod ordinal (postgres-0 → postgres).
+func stripOrdinalSuffix(name string) string {
+	i := strings.LastIndex(name, "-")
+	if i <= 0 || i == len(name)-1 {
+		return name
+	}
+	for _, r := range name[i+1:] {
+		if r < '0' || r > '9' {
+			return name
+		}
+	}
+	return name[:i]
 }
 
 func stripK8sHashSuffix(name string) string {

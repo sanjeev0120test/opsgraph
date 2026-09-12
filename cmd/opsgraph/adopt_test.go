@@ -279,6 +279,68 @@ func TestDeltaSameAndDifferent(t *testing.T) {
 	}
 }
 
+// A real cluster dump has no fixture clock and rarely lives in the default
+// namespace. Both broke `pack`: the wall clock goldened a sub-second
+// generated_at that its own replay truncated, and WritePack collapses
+// namespaces so source-derived rollout ids never matched the replay.
+const namespacedDumpForPack = `apiVersion: v1
+kind: List
+items:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: checkout
+      namespace: shop
+      labels:
+        app: checkout
+      creationTimestamp: "2026-07-31T11:00:00Z"
+    spec:
+      replicas: 3
+    status:
+      readyReplicas: 1
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: postgres
+      namespace: shop
+      creationTimestamp: "2026-07-31T09:00:00Z"
+    spec:
+      replicas: 3
+    status:
+      readyReplicas: 0
+`
+
+func TestPackFromCwdSnapshotReplays(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "k8s-snapshot.yaml"), []byte(namespacedDumpForPack), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("OPSGRAPH_FIXTURE", "")
+	t.Setenv("OPSGRAPH_CONFIG", "")
+	t.Setenv("OPSGRAPH_DATA_DIR", "")
+
+	out, errOut, code := runRoot(t, "pack", "--format", "json")
+	if code != 0 {
+		t.Fatalf("pack from cwd snapshot exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	packPath := filepath.Join(dir, "incident.opsgraph")
+	if _, err := os.Stat(packPath); err != nil {
+		t.Fatalf("expected default pack: %v", err)
+	}
+	if _, errOut, code = runRoot(t, "test", packPath); code != 0 {
+		t.Fatalf("replay of cwd pack exit=%d stderr=%s", code, errOut)
+	}
+	// The StatefulSet must survive the round trip, not just the Deployment.
+	out, errOut, code = runRoot(t, "ask", "postgres", "--fixture", packPath, "--format", "json")
+	if code != 0 {
+		t.Fatalf("ask postgres from pack exit=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if !strings.Contains(out, `"health": "unhealthy"`) {
+		t.Fatalf("statefulset health lost in pack:\n%s", out)
+	}
+}
+
 func TestPackDefaultOut(t *testing.T) {
 	fx := fixtureDir(t)
 	dir := t.TempDir()

@@ -48,7 +48,7 @@ func TestParseNativeKubectlList(t *testing.T) {
 	if !looksNativeK8s(data) {
 		t.Fatal("kubectl list should look native")
 	}
-	deps, evs, err := parseNativeK8s(data)
+	deps, evs, _, err := parseNativeK8s(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestParseNativeMultiDoc(t *testing.T) {
 		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: a\n  labels:\n    app: a\nspec:\n  replicas: 1\nstatus:\n  readyReplicas: 1\n" +
 		"---\n" +
 		"apiVersion: v1\nkind: Event\nmetadata:\n  name: e1\ninvolvedObject:\n  kind: Deployment\n  name: a\nreason: Pulled\nmessage: ok\nlastTimestamp: \"2026-07-31T11:00:00Z\"\n")
-	deps, evs, err := parseNativeK8s(data)
+	deps, evs, _, err := parseNativeK8s(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +171,189 @@ func TestParseNativeMultiDoc(t *testing.T) {
 	}
 }
 
+// Real clusters run datastores as StatefulSets and agents as DaemonSets; both
+// must produce health, not silence.
+const workloadSnapshot = `apiVersion: v1
+kind: List
+items:
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: postgres
+      namespace: shop
+      creationTimestamp: "2026-07-31T09:00:00Z"
+    spec:
+      replicas: 3
+    status:
+      readyReplicas: 0
+  - apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: fluentbit
+      namespace: kube-system
+      creationTimestamp: "2026-07-31T09:00:00Z"
+    status:
+      desiredNumberScheduled: 6
+      numberReady: 2
+  - apiVersion: v1
+    kind: Event
+    metadata:
+      name: postgres.17f8c
+      namespace: shop
+    involvedObject:
+      kind: Pod
+      name: postgres-0
+      namespace: shop
+    reason: Unhealthy
+    message: "Readiness probe failed: connection refused"
+    type: Warning
+    lastTimestamp: "2026-07-31T11:50:00Z"
+`
+
+func TestParseNativeStatefulSetAndDaemonSet(t *testing.T) {
+	if !looksNativeK8s([]byte("apiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: db\n")) {
+		t.Fatal("StatefulSet-only dump should look native")
+	}
+	if !looksNativeK8s([]byte("apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: agent\n")) {
+		t.Fatal("DaemonSet-only dump should look native")
+	}
+	deps, evs, stats, err := parseNativeK8s([]byte(workloadSnapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps.Deployments) != 2 {
+		t.Fatalf("workloads = %d, want 2: %+v", len(deps.Deployments), deps.Deployments)
+	}
+	byName := map[string]k8sDeployment{}
+	for _, d := range deps.Deployments {
+		byName[d.Name] = d
+	}
+	pg := byName["postgres"]
+	if pg.Kind != "statefulset" || pg.Desired != 3 || pg.Ready != 0 {
+		t.Fatalf("statefulset: %+v", pg)
+	}
+	// DaemonSets have no spec.replicas: counts come from scheduling status.
+	fb := byName["fluentbit"]
+	if fb.Kind != "daemonset" || fb.Desired != 6 || fb.Ready != 2 {
+		t.Fatalf("daemonset: %+v", fb)
+	}
+	if len(evs.Events) != 1 || evs.Events[0].ServiceID != "postgres" {
+		t.Fatalf("statefulset pod ordinal should map to postgres: %+v", evs.Events)
+	}
+	if stats.Kinds["StatefulSet"] != 1 || stats.Kinds["DaemonSet"] != 1 {
+		t.Fatalf("stats kinds: %+v", stats.Kinds)
+	}
+}
+
+func TestInferServiceIDStatefulSetPodOrdinal(t *testing.T) {
+	if got := inferServiceID("Pod", "postgres-0", nil); got != "postgres" {
+		t.Fatalf("ordinal strip: got %q", got)
+	}
+	if got := inferServiceID("Pod", "kafka-12", nil); got != "kafka" {
+		t.Fatalf("multi-digit ordinal: got %q", got)
+	}
+	// A Deployment pod keeps its numeric name segment; only the hashes go.
+	if got := inferServiceID("Pod", "web-2-7d9f8c4b5d-xk2n1", nil); got != "web-2" {
+		t.Fatalf("deployment pod must keep name digits: got %q", got)
+	}
+}
+
+func TestIngestStatefulSetAndDaemonSetHealth(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), []byte(workloadSnapshot), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml", now, k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	pg, err := s.GetService("postgres")
+	if err != nil {
+		t.Fatalf("statefulset must produce a service: %v", err)
+	}
+	if pg.Health != "unhealthy" {
+		t.Fatalf("postgres health = %q, want unhealthy", pg.Health)
+	}
+	fb, err := s.GetService("fluentbit")
+	if err != nil {
+		t.Fatalf("daemonset must produce a service: %v", err)
+	}
+	if fb.Health != "degraded" {
+		t.Fatalf("fluentbit health = %q, want degraded", fb.Health)
+	}
+	evs, err := s.ListAllEvidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Kind is part of the id so a Deployment and StatefulSet of one name cannot collide.
+	want := map[string]bool{"ev-k8s-rollout-shop-statefulset-postgres": false, "ev-k8s-rollout-kube-system-daemonset-fluentbit": false}
+	for _, e := range evs {
+		if _, ok := want[e.ID]; ok {
+			want[e.ID] = true
+		}
+	}
+	for id, found := range want {
+		if !found {
+			t.Fatalf("missing rollout evidence %q in %+v", id, evs)
+		}
+	}
+}
+
+func TestDeploymentRolloutIDsUnchanged(t *testing.T) {
+	// Deployments must keep their legacy ids so pack hashes and goldens hold.
+	root := t.TempDir()
+	src, err := os.ReadFile(filepath.Join("testdata", "kubectl-list.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml",
+		time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC), k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := s.ListAllEvidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range evs {
+		if e.ID == "ev-k8s-rollout-checkout" {
+			found = true
+			if e.Summary != "rollout checkout (1/3 ready)" {
+				t.Fatalf("deployment summary drifted: %q", e.Summary)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("legacy deployment rollout id missing: %+v", evs)
+	}
+}
+
+func TestSnapshotStatsSummary(t *testing.T) {
+	stats := k8sSnapshotStats{}
+	stats.observe("CronJob")
+	stats.observe("Service")
+	stats.observe("CronJob")
+	if got := stats.summary(); got != "CronJob x2, Service x1" {
+		t.Fatalf("summary = %q", got)
+	}
+	if got := (k8sSnapshotStats{}).summary(); got != "no objects" {
+		t.Fatalf("empty summary = %q", got)
+	}
+}
+
 func FuzzParseNativeK8s(f *testing.F) {
 	f.Add([]byte("kind: List\nitems: []\n"))
 	f.Add([]byte("kind: Deployment\nmetadata:\n  name: x\n"))
@@ -179,6 +362,6 @@ func FuzzParseNativeK8s(f *testing.F) {
 		if !looksNativeK8s(data) {
 			return
 		}
-		_, _, _ = parseNativeK8s(data)
+		_, _, _, _ = parseNativeK8s(data)
 	})
 }

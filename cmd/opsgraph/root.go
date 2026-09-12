@@ -59,7 +59,7 @@ func printStartHere(cmd *cobra.Command) {
 	cmd.Print(`opsgraph — portable incident evidence (offline, no account)
 
   1. Prove it   opsgraph prove
-  2. Dump k8s   kubectl get deploy,event -o yaml > k8s-snapshot.yaml
+  2. Dump k8s   kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
   3. Ask        opsgraph ask
   4. Share      opsgraph pack          → incident.opsgraph
   5. Open/diff  opsgraph incident.opsgraph

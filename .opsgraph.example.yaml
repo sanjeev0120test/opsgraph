@@ -38,7 +38,7 @@ connectors:
     repo_path: .
   kubernetes:
     # Pure-Go snapshot parser (no client-go). Native kubectl YAML or opsgraph dialect.
-    #   kubectl get deploy,event -o yaml > k8s-snapshot.yaml
+    #   kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
     enabled: false
     snapshot: "" # e.g. k8s-snapshot.yaml or fixtures/incident_checkout/k8s
   prometheus:

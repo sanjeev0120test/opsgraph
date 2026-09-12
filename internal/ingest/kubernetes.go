@@ -23,12 +23,25 @@ type k8sDeployments struct {
 }
 
 type k8sDeployment struct {
+	// Kind is the source workload kind (deployment/statefulset/daemonset).
+	// Empty means deployment, so packed deployments stay byte-identical.
+	Kind      string    `yaml:"kind,omitempty"`
 	Name      string    `yaml:"name"`
 	Namespace string    `yaml:"namespace"`
 	ServiceID string    `yaml:"service_id"`
 	Desired   int       `yaml:"desired"`
 	Ready     int       `yaml:"ready"`
 	UpdatedAt time.Time `yaml:"updated_at"`
+}
+
+// workloadLabel names a workload for evidence ids and summaries. Deployments
+// stay unlabelled so existing pack hashes and goldens are unchanged.
+func workloadLabel(kind string) string {
+	k := strings.ToLower(strings.TrimSpace(kind))
+	if k == "" || k == "deployment" {
+		return ""
+	}
+	return k
 }
 
 type k8sEvents struct {
@@ -83,9 +96,16 @@ func ingestK8sSnapshot(s *store.Store, fsys fs.FS, now time.Time) error {
 // ingestK8sFiles reads the given deployment/event files (if present), updates
 // service health, emits rollout changes, and records event evidence.
 func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time.Time, allow k8sAllow) error {
-	deps, evs, err := loadK8sSnapshot(fsys, depFile, evFile)
+	deps, evs, stats, err := loadK8sSnapshot(fsys, depFile, evFile)
 	if err != nil {
 		return err
+	}
+	// A dump full of objects opsgraph cannot read must not look like a healthy
+	// fleet; say what was in the file and which kinds carry health.
+	if stats.Native && len(deps.Deployments) == 0 {
+		fmt.Fprintf(os.Stderr,
+			"warning: kubernetes snapshot has no Deployment/StatefulSet/DaemonSet workloads (found: %s)\n",
+			stats.summary())
 	}
 	skippedDep := 0
 	bySvc := map[string][]k8sDeployment{}
@@ -269,12 +289,17 @@ func emitRollout(s *store.Store, d k8sDeployment, now time.Time) error {
 	// Keep short legacy ids for default-namespace fixtures; namespace elsewhere
 	// so same deployment name in two namespaces cannot overwrite.
 	suffix := d.Name
+	target := d.Name
+	if label := workloadLabel(d.Kind); label != "" {
+		suffix = label + "-" + suffix
+		target = label + "/" + d.Name
+	}
 	if ns := d.Namespace; ns != "" && ns != "default" {
-		suffix = slug(ns) + "-" + d.Name
+		suffix = slug(ns) + "-" + suffix
 	}
 	evID := "ev-k8s-rollout-" + suffix
 	changeID := "k8s-rollout-" + suffix
-	summary := fmt.Sprintf("rollout %s (%d/%d ready)", d.Name, d.Ready, d.Desired)
+	summary := fmt.Sprintf("rollout %s (%d/%d ready)", target, d.Ready, d.Desired)
 	at := d.UpdatedAt
 	if at.IsZero() {
 		// Evidence only: scrape-time At would keep R1/prime-suspect forever.
@@ -282,7 +307,7 @@ func emitRollout(s *store.Store, d k8sDeployment, now time.Time) error {
 		if obs.IsZero() {
 			obs = time.Now().UTC()
 		}
-		fmt.Fprintf(os.Stderr, "warning: deployment %q missing updated_at; skipping rollout change\n", d.Name)
+		fmt.Fprintf(os.Stderr, "warning: workload %q missing updated_at; skipping rollout change\n", target)
 		return s.UpsertEvidence(model.Evidence{
 			ID: evID, Source: "kubernetes", At: obs, Kind: "rollout",
 			Summary: summary, RawRef: d.Name, ServiceID: d.ServiceID,
