@@ -17,20 +17,24 @@ import (
 // the opsgraph dialect (top-level deployments:/events:). No k8s.io / client-go.
 
 type nativeObject struct {
-	Kind              string           `yaml:"kind"`
-	APIVersion        string           `yaml:"apiVersion"`
-	Metadata          nativeObjectMeta `yaml:"metadata"`
-	Spec              nativeDepSpec    `yaml:"spec"`
-	Status            nativeDepStatus  `yaml:"status"`
-	InvolvedObject    nativeObjectRef  `yaml:"involvedObject"`
-	Reason            string           `yaml:"reason"`
-	Message           string           `yaml:"message"`
-	Type              string           `yaml:"type"`
-	LastTimestamp     any              `yaml:"lastTimestamp"`
-	FirstTimestamp    any              `yaml:"firstTimestamp"`
-	EventTime         any              `yaml:"eventTime"`
-	CreationTimestamp any              `yaml:"creationTimestamp"`
-	Items             []nativeObject   `yaml:"items"`
+	Kind                     string           `yaml:"kind"`
+	APIVersion               string           `yaml:"apiVersion"`
+	Metadata                 nativeObjectMeta `yaml:"metadata"`
+	Spec                     nativeDepSpec    `yaml:"spec"`
+	Status                   nativeDepStatus  `yaml:"status"`
+	InvolvedObject           nativeObjectRef  `yaml:"involvedObject"`
+	Regarding                nativeObjectRef  `yaml:"regarding"`
+	Reason                   string           `yaml:"reason"`
+	Message                  string           `yaml:"message"`
+	Note                     string           `yaml:"note"`
+	Type                     string           `yaml:"type"`
+	LastTimestamp            any              `yaml:"lastTimestamp"`
+	FirstTimestamp           any              `yaml:"firstTimestamp"`
+	DeprecatedLastTimestamp  any              `yaml:"deprecatedLastTimestamp"`
+	DeprecatedFirstTimestamp any              `yaml:"deprecatedFirstTimestamp"`
+	EventTime                any              `yaml:"eventTime"`
+	CreationTimestamp        any              `yaml:"creationTimestamp"`
+	Items                    []nativeObject   `yaml:"items"`
 }
 
 type nativeObjectMeta struct {
@@ -301,8 +305,15 @@ func workloadReplicas(o nativeObject, kind string) (desired, ready int) {
 }
 
 func nativeToEvent(o nativeObject) (k8sEvent, bool) {
-	kind := o.InvolvedObject.Kind
-	name := o.InvolvedObject.Name
+	// core/v1 uses involvedObject + message; events.k8s.io/v1 uses regarding + note.
+	// kubectl get event on current clusters often emits the latter. Falling back
+	// to metadata.name would invent a fake service (checkout.17f8c) and drop the text.
+	ref := o.InvolvedObject
+	if strings.TrimSpace(ref.Name) == "" {
+		ref = o.Regarding
+	}
+	kind := ref.Kind
+	name := ref.Name
 	if strings.TrimSpace(name) == "" {
 		name = o.Metadata.Name
 		kind = o.Kind
@@ -313,15 +324,19 @@ func nativeToEvent(o nativeObject) (k8sEvent, bool) {
 	}
 	ns := strings.TrimSpace(o.Metadata.Namespace)
 	if ns == "" {
-		ns = strings.TrimSpace(o.InvolvedObject.Namespace)
+		ns = strings.TrimSpace(ref.Namespace)
 	}
-	at := firstK8sTime(o.LastTimestamp, o.EventTime, o.FirstTimestamp, o.Metadata.CreationTimestamp, o.CreationTimestamp)
+	msg := strings.TrimSpace(o.Message)
+	if msg == "" {
+		msg = strings.TrimSpace(o.Note)
+	}
+	at := firstK8sTime(o.LastTimestamp, o.DeprecatedLastTimestamp, o.EventTime, o.FirstTimestamp, o.DeprecatedFirstTimestamp, o.Metadata.CreationTimestamp, o.CreationTimestamp)
 	return k8sEvent{
 		ServiceID: sid,
 		Namespace: ns,
 		At:        at,
 		Reason:    o.Reason,
-		Message:   o.Message,
+		Message:   msg,
 		Type:      o.Type,
 	}, true
 }
