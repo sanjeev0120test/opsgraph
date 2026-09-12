@@ -261,8 +261,8 @@ with `OPSGRAPH_INSTALL_DIR`, and verify provenance with
 ### From source
 
 ```bash
-# Dev-only tip-of-tree (no release ldflags / -buildid=):
-go install github.com/sanjeev0120test/opsgraph/cmd/opsgraph@latest
+# Tip of main (not @latest — that is the newest release tag):
+go install github.com/sanjeev0120test/opsgraph/cmd/opsgraph@main
 ```
 
 Release page: https://github.com/sanjeev0120test/opsgraph/releases

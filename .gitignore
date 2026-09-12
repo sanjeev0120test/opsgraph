@@ -21,6 +21,8 @@ DEPENDENCIES.txt
 
 # --- Runtime data / SQLite state ---
 /.opsgraph/
+# Default pack name from `opsgraph pack`.
+/*.opsgraph
 *.db
 *.db-wal
 *.db-shm
