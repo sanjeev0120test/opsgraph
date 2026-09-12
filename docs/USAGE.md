@@ -45,7 +45,7 @@ opsgraph ask checkout --fixture fixtures/incident_checkout
 opsgraph ask --fixture fixtures/incident_checkout
 
 # CWD dump, no flags, no catalog:
-kubectl get deploy,event -o yaml > k8s-snapshot.yaml
+kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
 opsgraph ask
 
 # From a persistent store (explicit; no live re-scrape):
@@ -73,14 +73,21 @@ Other exits: `status` with no data → `1`; `watch` timeout → `1` (bad config 
 Write `.opsgraph.yaml` for this repo. No service catalog required.
 
 ```bash
-kubectl get deploy,event -o yaml > k8s-snapshot.yaml
+kubectl get deploy,statefulset,daemonset,event -o yaml > k8s-snapshot.yaml
 opsgraph init --k8s k8s-snapshot.yaml
 opsgraph ask
 ```
 
 `--k8s` accepts a directory (`deployments.yaml` + optional `events.yaml`) or a
-single kubectl YAML file (`kind: List` / `Deployment` / `Event`). `--force`
-overwrites an existing config. `--git` defaults to `.`.
+single kubectl YAML file (`kind: List` / `Deployment` / `StatefulSet` /
+`DaemonSet` / `Event`). `--force` overwrites an existing config. `--git`
+defaults to `.`.
+
+Workload health comes from replica readiness: `spec.replicas` vs
+`status.readyReplicas` for Deployments and StatefulSets, and
+`status.desiredNumberScheduled` vs `status.numberReady` for DaemonSets. If a
+snapshot contains none of these kinds, `opsgraph` says so on stderr and lists
+the kinds it did find rather than reporting an empty fleet.
 
 ### `opsgraph prove`
 One-command offline proof. Ingests the built-in incident, writes a pack, replays
@@ -194,7 +201,7 @@ Fleet alert list. `--firing` keeps active (`firing`/`pending`) alerts; `--servic
 In `.opsgraph.yaml` (see `.opsgraph.example.yaml`):
 
 - `connectors.git` — local repo scan
-- `connectors.kubernetes.snapshot` — directory or file. Accepts native `kubectl get -o yaml` (`kind: List` / `Deployment` / `Event`) and the opsgraph dialect (`deployments:` / `events:`). Optional Helm `releases.yaml`.
+- `connectors.kubernetes.snapshot` — directory or file. Accepts native `kubectl get -o yaml` (`kind: List` / `Deployment` / `StatefulSet` / `DaemonSet` / `Event`, including multi-doc) and the opsgraph dialect (`deployments:` / `events:`). Optional Helm `releases.yaml`.
 - `connectors.prometheus` / `connectors.alertmanager` — disabled by default
 
 Optional cluster demo: `bash hack/kind-demo.sh`.
@@ -206,27 +213,50 @@ to the git source tree). Pushing a `v*` tag automatically runs the release
 workflow: build 6 targets, package archives, write `SHA256SUMS`, attest
 provenance, and publish the Release.
 
-Prefer the **attested release copies** of the installers (same tag as the binary):
+### Quick install (latest release)
+
+Both installers resolve the latest tag, download the archive for your OS/arch,
+and **verify it against the release `SHA256SUMS` before installing**. They abort
+on any mismatch.
 
 ```bash
-# Linux/macOS — pin VERSION to a release tag; verify installer via SHA256SUMS
-VERSION=v0.1.10
-curl -fsSL "https://github.com/sanjeev0120test/opsgraph/releases/download/${VERSION}/SHA256SUMS" -o SHA256SUMS
-curl -fsSL "https://github.com/sanjeev0120test/opsgraph/releases/download/${VERSION}/install.sh" -o install.sh
-sha256sum -c SHA256SUMS --ignore-missing
-chmod +x install.sh
-OPSGRAPH_VERSION="$VERSION" ./install.sh
-# Installer lands in ~/.local/bin by default — add it to PATH if needed.
+# Linux/macOS — lands in ~/.local/bin (add to PATH if needed)
+curl -fsSL https://github.com/sanjeev0120test/opsgraph/releases/latest/download/install.sh | bash
+```
 
-# Windows PowerShell
-$Version = "v0.1.10"
-Invoke-WebRequest "https://github.com/sanjeev0120test/opsgraph/releases/download/$Version/SHA256SUMS" -OutFile SHA256SUMS
-Invoke-WebRequest "https://github.com/sanjeev0120test/opsgraph/releases/download/$Version/install.ps1" -OutFile install.ps1
-# Confirm install.ps1 hash appears in SHA256SUMS, then:
-$env:OPSGRAPH_VERSION = $Version
-./install.ps1
-# Default install dir: %LOCALAPPDATA%\opsgraph\bin — add to PATH if needed.
+```powershell
+# Windows — lands in %LOCALAPPDATA%\opsgraph\bin (add to PATH if needed)
+irm https://github.com/sanjeev0120test/opsgraph/releases/latest/download/install.ps1 | iex
+```
 
+Then confirm the install works, entirely offline:
+
+```bash
+opsgraph version
+opsgraph prove
+```
+
+### Verify the installer before running it
+
+If you would rather not pipe a script into a shell, download the installer and
+check it against `SHA256SUMS` (which is covered by the release provenance
+attestation) first:
+
+```bash
+BASE=https://github.com/sanjeev0120test/opsgraph/releases/latest/download
+curl -fsSL "$BASE/SHA256SUMS" -o SHA256SUMS
+curl -fsSL "$BASE/install.sh" -o install.sh
+sha256sum -c SHA256SUMS --ignore-missing   # must print: install.sh: OK
+chmod +x install.sh && ./install.sh
+```
+
+Pin a specific tag with `OPSGRAPH_VERSION=v1.2.3`, change the target directory
+with `OPSGRAPH_INSTALL_DIR`, and verify provenance with
+`gh attestation verify <archive> --repo sanjeev0120test/opsgraph`.
+
+### From source
+
+```bash
 # Dev-only tip-of-tree (no release ldflags / -buildid=):
 go install github.com/sanjeev0120test/opsgraph/cmd/opsgraph@latest
 ```
