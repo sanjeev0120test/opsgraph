@@ -284,6 +284,8 @@ or config error.
   you would run on the laptop that holds the dump.
 - Do not commit dumps that contain Secrets. `export` sanitizes known secret
   keys; it is not a redaction guarantee.
+- `opsgraph prove` is the contract: same evidence IDs and the same `.opsgraph`
+  SHA-256 on any OS, no cluster. CI runs that on ubuntu, macOS, and Windows.
 
 See [SECURITY.md](SECURITY.md).
 
@@ -342,9 +344,5 @@ automation surfaces.
 - Pack files from older builds still `open` / `test` if goldens match.
 - Pin a release tag in installers. Tip of `main` is `go install …@main`.
   `go install …@latest` is the highest semver tag, not the branch.
-
-`opsgraph prove` is the contract: same evidence IDs and the same `.opsgraph`
-SHA-256 on any OS, no cluster. CI runs that on ubuntu, macOS, and Windows.
-Read [Architecture](docs/ARCHITECTURE.md) if you need the pipeline, not the pitch.
 
 Docs: [Usage](docs/USAGE.md) · [Architecture](docs/ARCHITECTURE.md) · [Runbook format](docs/RUNBOOK_FORMAT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releases](https://github.com/sanjeev0120test/opsgraph/releases)
