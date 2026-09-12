@@ -26,6 +26,13 @@ var ErrNoDataSource = errors.New("no data source")
 // ErrInvalidSince means --since was negative or otherwise unusable.
 var ErrInvalidSince = errors.New("invalid --since")
 
+// nowUTC is the wall clock seed for the engine. It is truncated to the second
+// because fixture clocks are, and packs golden their own `ask` output: a
+// sub-second `generated_at` would never match its own replay.
+func nowUTC() time.Time {
+	return time.Now().UTC().Truncate(time.Second)
+}
+
 // loadedStore holds an opened store plus the effective "now" and a cleanup func.
 // source is one of: fixture | persisted | live (for status/operator clarity).
 type loadedStore struct {
@@ -187,7 +194,7 @@ func loadAskStore(ctx context.Context, fixture, configPath, dataDirFlag string, 
 		return storeFromFixtureDir(fixture)
 	}
 	if dataDirFlag != "" {
-		ls, err := storeFromDataDir(dataDirFlag, time.Now().UTC())
+		ls, err := storeFromDataDir(dataDirFlag, nowUTC())
 		if err != nil {
 			return nil, err
 		}
@@ -211,14 +218,14 @@ func loadAskStore(ctx context.Context, fixture, configPath, dataDirFlag string, 
 	fallbackPersisted := func(reason error) (*loadedStore, error) {
 		if counts, peekErr := peekCounts(dir); peekErr == nil && counts["services"] > 0 {
 			fmt.Fprintf(os.Stderr, "warning: live connectors %v; using persisted store at %s\n", reason, dir)
-			return storeFromDataDir(dir, time.Now().UTC())
+			return storeFromDataDir(dir, nowUTC())
 		}
 		return nil, reason
 	}
 	// Live connectors beat a stale state.db so ask/why/watch see fresh signals
 	// when a config is present. Explicit --data-dir still forces the store.
 	if effPath != "" && liveConnectorsEnabled(cfg) {
-		ls, err := storeFromConfig(ctx, cfg, configDir, since, time.Now().UTC())
+		ls, err := storeFromConfig(ctx, cfg, configDir, since, nowUTC())
 		if err != nil {
 			return fallbackPersisted(err)
 		}
@@ -254,13 +261,13 @@ func loadAskStore(ctx context.Context, fixture, configPath, dataDirFlag string, 
 	}
 	if counts, err := peekCounts(dir); err == nil {
 		if counts["services"] > 0 {
-			return storeFromDataDir(dir, time.Now().UTC())
+			return storeFromDataDir(dir, nowUTC())
 		}
 		return nil, fmt.Errorf("%w at %s: run `opsgraph ingest` first or pass `--fixture`", ErrEmptyStore, dir)
 	}
 	if effPath == "" {
 		if auto, autoDir, ok := detectCwdSource(); ok {
-			ls, err := storeFromConfig(ctx, auto, autoDir, since, time.Now().UTC())
+			ls, err := storeFromConfig(ctx, auto, autoDir, since, nowUTC())
 			if err == nil {
 				counts, cerr := ls.store.Counts()
 				if cerr != nil {
@@ -275,7 +282,7 @@ func loadAskStore(ctx context.Context, fixture, configPath, dataDirFlag string, 
 		}
 		return nil, fmt.Errorf("%w: pass --fixture <pack>, drop a k8s-snapshot.yaml here, run `opsgraph ingest`, or add a .opsgraph.yaml", ErrNoDataSource)
 	}
-	ls, err := storeFromConfig(ctx, cfg, configDir, since, time.Now().UTC())
+	ls, err := storeFromConfig(ctx, cfg, configDir, since, nowUTC())
 	if err != nil {
 		return nil, err
 	}

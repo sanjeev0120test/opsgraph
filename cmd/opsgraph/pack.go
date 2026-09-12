@@ -78,7 +78,16 @@ func newPackCmd() *cobra.Command {
 			if err := ingest.WritePack(ls.store, ls.now, workDir); err != nil {
 				return fail(2, "write pack: %v", err)
 			}
-			n, err := writePackGoldens(ls, workDir)
+			// Golden the pack's own replay, not the source store. WritePack
+			// normalizes the snapshot (namespaces collapse to default, replica
+			// counts are synthesized from health), so goldens taken from the
+			// source would describe something the pack cannot reproduce.
+			replay, err := storeFromFixtureDir(workDir)
+			if err != nil {
+				return fail(2, "read back pack: %v", err)
+			}
+			n, err := writePackGoldens(replay, workDir)
+			replay.cleanup()
 			if err != nil {
 				return fail(2, "write goldens: %v", err)
 			}
