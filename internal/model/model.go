@@ -22,6 +22,21 @@ type Service struct {
 	Sources []string          `json:"sources,omitempty"`
 }
 
+// IsDependencyStub reports a synthesized edge endpoint with no real connector
+// (fixture/k8s/git/plugin). Hottest/health --strict must not treat it as a
+// paging service.
+func IsDependencyStub(s Service) bool {
+	if len(s.Sources) == 0 {
+		return false
+	}
+	for _, src := range s.Sources {
+		if src != "dependency" {
+			return false
+		}
+	}
+	return true
+}
+
 // Owner is a team or person responsible for services.
 type Owner struct {
 	ID    string `json:"id"`

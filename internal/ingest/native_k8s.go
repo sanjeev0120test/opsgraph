@@ -85,6 +85,23 @@ func isWorkloadKind(kind string) bool {
 	return false
 }
 
+func eventObjectKindAllowed(kind string) bool {
+	switch normalizeKind(kind) {
+	case "pod", "replicaset", "deployment", "statefulset", "daemonset", "service", "job":
+		return true
+	}
+	return false
+}
+
+func hasAppLabel(labels map[string]string) bool {
+	for _, k := range []string{"app.kubernetes.io/name", "app"} {
+		if strings.TrimSpace(labels[k]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // k8sSnapshotStats records what a native dump actually contained, so a snapshot
 // that yields no workloads can explain itself instead of looking like a healthy fleet.
 type k8sSnapshotStats struct {
@@ -316,6 +333,11 @@ func nativeToEvent(o nativeObject) (k8sEvent, bool) {
 	// (checkout.17f8c) must never become a service id.
 	sid := inferServiceID(ref.Kind, ref.Name, o.Metadata.Labels)
 	if sid == "" {
+		return k8sEvent{}, false
+	}
+	// Node/ConfigMap/Lease events are common in `kubectl get event` and must
+	// not become fleet services. Labels still map; workload/Service/Job refs too.
+	if !eventObjectKindAllowed(ref.Kind) && !hasAppLabel(o.Metadata.Labels) {
 		return k8sEvent{}, false
 	}
 	ns := strings.TrimSpace(o.Metadata.Namespace)

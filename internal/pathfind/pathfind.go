@@ -36,7 +36,7 @@ func Shortest(deps []model.Dependency, from, to string) (Path, error) {
 		adj[f] = append(adj[f], t)
 	}
 	for k := range adj {
-		sort.Strings(adj[k])
+		adj[k] = uniqSorted(adj[k])
 	}
 	type item struct {
 		id   string
@@ -60,4 +60,18 @@ func Shortest(deps []model.Dependency, from, to string) (Path, error) {
 		}
 	}
 	return Path{}, fmt.Errorf("no dependency path from %q to %q", from, to)
+}
+
+func uniqSorted(ids []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }

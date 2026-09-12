@@ -85,7 +85,7 @@ func Compute(res model.AskResult) Result {
 	}
 	if badDown > 0 {
 		b["downstream_impact"] = min(15, badDown*5)
-		highlights = append(highlights, "unhealthy downstream dependency")
+		highlights = append(highlights, "unhealthy downstream dependent")
 	} else if n := len(res.Downstream); n >= 3 {
 		// Wide blast still matters even when neighbors look healthy.
 		b["downstream_impact"] = min(10, n)

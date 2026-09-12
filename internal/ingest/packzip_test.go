@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -119,6 +120,38 @@ func TestUnzipPackRejectsDotDot(t *testing.T) {
 	}
 	if err := ingest.UnzipPack(zipPath, dest); err == nil {
 		t.Fatal("expected unsafe path error")
+	}
+}
+
+func TestUnzipPackRejectsTooManyFiles(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "many.zip")
+	f, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	for i := 0; i < 257; i++ {
+		w, err := zw.Create("f-" + strconv.Itoa(i) + ".txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ingest.UnzipPack(zipPath, dest); err == nil {
+		t.Fatal("expected file-count budget error")
 	}
 }
 

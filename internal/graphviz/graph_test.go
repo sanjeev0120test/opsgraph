@@ -92,4 +92,11 @@ func TestSortedDepsIncludesTypeAndSkipsEmpty(t *testing.T) {
 	if m1 != m2 {
 		t.Fatalf("mermaid type order not stable:\n%s\n---\n%s", m1, m2)
 	}
+	dup := ASCII(svcs, []model.Dependency{
+		{FromServiceID: "a", ToServiceID: "b", Type: "http"},
+		{FromServiceID: "a", ToServiceID: "b", Type: "http"},
+	})
+	if strings.Count(dup, "(http)") != 1 {
+		t.Fatalf("duplicate edge should collapse: %s", dup)
+	}
 }

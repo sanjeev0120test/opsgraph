@@ -51,10 +51,20 @@ func newHealthCmd() *cobra.Command {
 			for k := range by {
 				sort.Strings(by[k])
 			}
-			// Fail-closed: unknown health (e.g. synthesized deps) is not "ok".
+			stubs := 0
+			for _, s := range svcs {
+				if model.IsDependencyStub(s) {
+					stubs++
+				}
+			}
+			// Synthesized dependency targets are not paging services.
+			unknownReal := counts[model.HealthUnknown] - stubs
+			if unknownReal < 0 {
+				unknownReal = 0
+			}
 			ok := counts[model.HealthDegraded] == 0 &&
 				counts[model.HealthUnhealthy] == 0 &&
-				counts[model.HealthUnknown] == 0
+				unknownReal == 0
 			out := struct {
 				Total   int                 `json:"total"`
 				OK      bool                `json:"ok"`
@@ -93,7 +103,7 @@ func newHealthCmd() *cobra.Command {
 	}
 	bindSourceFlags(cmd, &src)
 	cmd.Flags().StringVar(&format, "format", "table", "output format: table|json")
-	cmd.Flags().BoolVar(&strict, "strict", false, "exit 1 if any service is degraded or unhealthy")
+	cmd.Flags().BoolVar(&strict, "strict", false, "exit 1 if any non-stub service is degraded, unhealthy, or unknown")
 	_ = cmd.RegisterFlagCompletionFunc("format", completeFormatTableJSON)
 	return cmd
 }

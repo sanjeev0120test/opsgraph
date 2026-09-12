@@ -38,6 +38,21 @@ func TestAlertLive(t *testing.T) {
 	}
 }
 
+func TestIsDependencyStub(t *testing.T) {
+	if !IsDependencyStub(Service{ID: "redis", Sources: []string{"dependency"}}) {
+		t.Fatal("dependency-only must be a stub")
+	}
+	if IsDependencyStub(Service{ID: "checkout", Sources: []string{"kubernetes", "dependency"}}) {
+		t.Fatal("real workload with a stub source is not a stub")
+	}
+	if IsDependencyStub(Service{ID: "api", Sources: []string{"fixture"}}) {
+		t.Fatal("fixture service is not a stub")
+	}
+	if IsDependencyStub(Service{ID: "x"}) {
+		t.Fatal("empty sources is not a stub")
+	}
+}
+
 func TestHealthConstants(t *testing.T) {
 	for _, h := range []string{HealthHealthy, HealthDegraded, HealthUnhealthy, HealthUnknown} {
 		if h == "" {

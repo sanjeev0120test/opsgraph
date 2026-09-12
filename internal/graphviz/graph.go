@@ -130,10 +130,18 @@ func safeID(id string) string {
 
 func sortedDeps(deps []model.Dependency) []model.Dependency {
 	sorted := make([]model.Dependency, 0, len(deps))
+	seen := map[string]bool{}
 	for _, d := range deps {
-		if strings.TrimSpace(d.FromServiceID) == "" || strings.TrimSpace(d.ToServiceID) == "" {
+		from, to := strings.TrimSpace(d.FromServiceID), strings.TrimSpace(d.ToServiceID)
+		if from == "" || to == "" {
 			continue
 		}
+		d.FromServiceID, d.ToServiceID = from, to
+		key := from + "\x00" + to + "\x00" + d.Type
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		sorted = append(sorted, d)
 	}
 	sort.SliceStable(sorted, func(i, j int) bool {

@@ -13,6 +13,14 @@ import (
 	"time"
 )
 
+// Extract budgets for emailed .opsgraph packs. UncompressedSize64 is advisory;
+// LimitReader is the real zip-bomb brake.
+const (
+	maxPackFiles     = 256
+	maxPackFileBytes = 8 << 20
+	maxPackBytes     = 32 << 20
+)
+
 // IsPackArchive reports whether path is a shareable opsgraph pack (.zip or .opsgraph).
 func IsPackArchive(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
@@ -141,50 +149,66 @@ func UnzipPack(src, dest string) error {
 	}
 	defer r.Close()
 	dest = filepath.Clean(dest)
+	if len(r.File) > maxPackFiles {
+		return fmt.Errorf("pack has %d files (max %d)", len(r.File), maxPackFiles)
+	}
+	var total int64
 	for _, f := range r.File {
-		if err := extractZipFile(f, dest); err != nil {
+		n, err := extractZipFile(f, dest)
+		if err != nil {
 			return err
+		}
+		total += n
+		if total > maxPackBytes {
+			return fmt.Errorf("pack exceeds %d byte extract budget", maxPackBytes)
 		}
 	}
 	return nil
 }
 
-func extractZipFile(f *zip.File, dest string) error {
+func extractZipFile(f *zip.File, dest string) (int64, error) {
 	name := strings.ReplaceAll(f.Name, "\\", "/")
 	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, ":") {
-		return fmt.Errorf("unsafe path in pack: %q", f.Name)
+		return 0, fmt.Errorf("unsafe path in pack: %q", f.Name)
 	}
 	for _, p := range strings.Split(name, "/") {
 		if p == ".." {
-			return fmt.Errorf("unsafe path in pack: %q", f.Name)
+			return 0, fmt.Errorf("unsafe path in pack: %q", f.Name)
 		}
 	}
 	target := filepath.Join(dest, filepath.FromSlash(name))
 	rel, err := filepath.Rel(dest, target)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("unsafe path in pack: %q", f.Name)
+	sep := string(filepath.Separator)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+sep) {
+		return 0, fmt.Errorf("unsafe path in pack: %q", f.Name)
 	}
 	if f.FileInfo().IsDir() {
-		return os.MkdirAll(target, 0o755)
+		return 0, os.MkdirAll(target, 0o755)
+	}
+	if f.UncompressedSize64 > maxPackFileBytes {
+		return 0, fmt.Errorf("pack file %q exceeds %d byte file budget", f.Name, maxPackFileBytes)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
+		return 0, err
 	}
 	rc, err := f.Open()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer rc.Close()
 	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, copyErr := io.Copy(out, rc)
+	n, copyErr := io.Copy(out, io.LimitReader(rc, maxPackFileBytes+1))
 	closeErr := out.Close()
 	if copyErr != nil {
-		return copyErr
+		return n, copyErr
 	}
-	return closeErr
+	if n > maxPackFileBytes {
+		return n, fmt.Errorf("pack file %q exceeds %d byte file budget", f.Name, maxPackFileBytes)
+	}
+	return n, closeErr
 }
 
 // FileSHA256 returns the hex SHA-256 of path (independent check for emailed packs).

@@ -249,6 +249,30 @@ func TestIngestEventsK8sV1EvidenceOnService(t *testing.T) {
 	}
 }
 
+func TestParseNodeEventDoesNotInventService(t *testing.T) {
+	node := []byte("" +
+		"apiVersion: v1\nkind: Event\nmetadata:\n  name: ip-10-0-1-5.17f8c\n" +
+		"involvedObject:\n  kind: Node\n  name: ip-10-0-1-5\nreason: NodeReady\nmessage: node is ready\n")
+	_, evs, _, err := parseNativeK8s(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.Events) != 0 {
+		t.Fatalf("Node events must not become services: %+v", evs.Events)
+	}
+
+	svc := []byte("" +
+		"apiVersion: v1\nkind: Event\nmetadata:\n  name: checkout.svc\n" +
+		"involvedObject:\n  kind: Service\n  name: checkout\nreason: Updated\nmessage: endpoints\n")
+	_, evs, _, err = parseNativeK8s(svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.Events) != 1 || evs.Events[0].ServiceID != "checkout" {
+		t.Fatalf("Service events should map: %+v", evs.Events)
+	}
+}
+
 func TestParseEventWithoutObjectRefDoesNotInventService(t *testing.T) {
 	orphan := []byte("" +
 		"apiVersion: events.k8s.io/v1\nkind: Event\nmetadata:\n  name: checkout.17f8c\n  namespace: shop\nreason: Unhealthy\nnote: dropped\n")
