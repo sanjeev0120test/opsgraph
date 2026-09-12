@@ -2,7 +2,8 @@ name: ci
 
 # Fast parallel quality gates. Wall-clock is the slowest job, not the sum.
 # Ubuntu runs the full suite (race + 21-loop prove + module-graph rebuilds).
-# Windows/macOS/arm64 use -short: same OS contracts, skip Linux-only burn.
+# Windows/macOS/arm64 use -short on OS-sensitive packages only (CLI, store,
+# ingest, config). Ubuntu ./... + race remains the full logic + determinism suite.
 # Target: ~3 minutes on cache hits (ubuntu race is the floor).
 # Required aggregator job: "all checks passed".
 # Tag pushes are owned by release.yml (skip here to avoid duplicate runners).
@@ -240,7 +241,9 @@ jobs:
           esac
       - name: Unit tests (shuffle, short)
         if: ${{ !matrix.race }}
-        run: go test -count=1 -timeout=4m -short -shuffle=on -fullpath ./...
+        # Ubuntu ./... + race is the full logic suite. Other OSes only compile
+        # packages that touch paths, SQLite, zip, or the CLI.
+        run: go test -count=1 -timeout=4m -short -shuffle=on -fullpath ./cmd/opsgraph ./internal/store ./internal/ingest ./internal/config
       - name: Unit tests (race + shuffle + cover)
         if: ${{ matrix.race && matrix.os == 'ubuntu-24.04' }}
         env:
@@ -787,7 +790,8 @@ jobs:
           set -euo pipefail
           test "$(go env GOARCH)" = "arm64"
           go build -trimpath -ldflags="-s -w -buildid=" -o bin/opsgraph ./cmd/opsgraph
-          go test -count=1 -timeout=3m -short -shuffle=on ./...
+          go test -count=1 -timeout=3m -short -shuffle=on \
+            ./cmd/opsgraph ./internal/store ./internal/ingest ./internal/config
           ./bin/opsgraph test ./fixtures/incident_checkout
           ./bin/opsgraph validate-fixture ./fixtures/fleet_healthy
           JA=(go run ./scripts/jsonassert.go)
