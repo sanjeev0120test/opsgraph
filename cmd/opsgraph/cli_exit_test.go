@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,9 @@ func runRoot(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	root.SetErr(&errBuf)
 	root.SetArgs(rewriteRootArgs(root, args))
 	err := root.Execute()
+	if err != nil {
+		fmt.Fprintln(&errBuf, "opsgraph:", err)
+	}
 	return out.String(), errBuf.String(), exitCodeFor(err)
 }
 
@@ -46,9 +50,22 @@ func TestCLIExitAskCheckoutOK(t *testing.T) {
 }
 
 func TestCLIExitAskUnknownService(t *testing.T) {
-	_, _, code := runRoot(t, "ask", "nosuch", "--fixture", fixtureDir(t))
+	_, errOut, code := runRoot(t, "ask", "nosuch", "--fixture", fixtureDir(t))
 	if code != 1 {
 		t.Fatalf("ask nosuch exit = %d, want 1", code)
+	}
+	if !strings.Contains(errOut, "try: opsgraph services") {
+		t.Fatalf("unknown service must hint services:\n%s", errOut)
+	}
+}
+
+func TestCLIAskDidYouMean(t *testing.T) {
+	_, errOut, code := runRoot(t, "ask", "chekout", "--fixture", fixtureDir(t))
+	if code != 1 {
+		t.Fatalf("typo exit = %d, want 1 stderr=%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "did you mean") || !strings.Contains(errOut, "checkout") {
+		t.Fatalf("typo must suggest checkout:\n%s", errOut)
 	}
 }
 

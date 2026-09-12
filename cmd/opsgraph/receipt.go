@@ -109,5 +109,6 @@ func printReceipt(cmd *cobra.Command, rec *incidentReceipt) {
 	if rec.SHA256 != "" {
 		cmd.Printf("  sha256      %s\n", rec.SHA256)
 	}
+	cmd.Printf("detail: opsgraph ask %s   ·   opsgraph handoff %s\n", rec.Service, rec.Service)
 	cmd.Printf("replay: opsgraph test <pack>   ·   prove: opsgraph prove\n")
 }

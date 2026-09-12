@@ -23,6 +23,17 @@ var ErrEmptyStore = errors.New("empty store")
 // ErrNoDataSource means no fixture, config, or persisted store is available.
 var ErrNoDataSource = errors.New("no data source")
 
+// k8sDumpCmd is the one-line dump on-call should run. Keep in sync with
+// README, USAGE, and the start-here screen.
+const k8sDumpCmd = "kubectl get deploy,statefulset,daemonset,job,event -o yaml > k8s-snapshot.yaml"
+
+func isBrokenK8sSnapshot(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "kubernetes snapshot")
+}
+
 // ErrInvalidSince means --since was negative or otherwise unusable.
 var ErrInvalidSince = errors.New("invalid --since")
 
@@ -222,7 +233,10 @@ func loadAskStore(ctx context.Context, fixture, configPath, dataDirFlag string, 
 	dir := resolveDataDir("", cfg, configDir)
 	fallbackPersisted := func(reason error) (*loadedStore, error) {
 		if counts, peekErr := peekCounts(dir); peekErr == nil && counts["services"] > 0 {
-			fmt.Fprintf(os.Stderr, "warning: live connectors %v; using persisted store at %s\n", reason, dir)
+			fmt.Fprintf(os.Stderr, "warning: live connectors %v; using STALE persisted store at %s\n", reason, dir)
+			if isBrokenK8sSnapshot(reason) {
+				fmt.Fprintf(os.Stderr, "next: %s\n", k8sDumpCmd)
+			}
 			return storeFromDataDir(dir, nowUTC())
 		}
 		return nil, reason

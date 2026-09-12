@@ -8,7 +8,6 @@ import (
 	"github.com/sanjeev0120test/opsgraph/internal/ask"
 	"github.com/sanjeev0120test/opsgraph/internal/config"
 	"github.com/sanjeev0120test/opsgraph/internal/output"
-	"github.com/sanjeev0120test/opsgraph/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -82,10 +81,7 @@ func newAskCmd() *cobra.Command {
 			}
 			res, err := ask.Ask(ls.store, service, ask.Options{Since: since, Now: ls.now, WithRunbook: withRB})
 			if err != nil {
-				if errors.Is(err, ask.ErrServiceNotFound) || errors.Is(err, store.ErrAmbiguous) {
-					return fail(1, "%v", err)
-				}
-				return fail(2, "%v", err)
+				return failAskStore(ls.store, err)
 			}
 
 			if useAI {

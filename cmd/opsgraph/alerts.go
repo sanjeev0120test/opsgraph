@@ -52,7 +52,7 @@ func newAlertsCmd() *cobra.Command {
 			if service != "" {
 				svc, err := ls.store.GetServiceByNameOrAlias(service)
 				if err != nil {
-					return failLookup(service, err)
+					return failLookupStore(ls.store, service, err)
 				}
 				filtered := list[:0]
 				for _, a := range list {

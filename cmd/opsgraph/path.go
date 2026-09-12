@@ -31,11 +31,11 @@ func newPathCmd() *cobra.Command {
 			defer ls.cleanup()
 			from, err := ls.store.GetServiceByNameOrAlias(args[0])
 			if err != nil {
-				return failLookup(args[0], err)
+				return failLookupStore(ls.store, args[0], err)
 			}
 			to, err := ls.store.GetServiceByNameOrAlias(args[1])
 			if err != nil {
-				return failLookup(args[1], err)
+				return failLookupStore(ls.store, args[1], err)
 			}
 			if from.ID == to.ID {
 				return fail(2, "path requires two distinct services (both resolve to %q)", from.ID)

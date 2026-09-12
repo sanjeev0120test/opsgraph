@@ -29,7 +29,7 @@ func newImpactCmd() *cobra.Command {
 			defer ls.cleanup()
 			svc, err := ls.store.GetServiceByNameOrAlias(args[0])
 			if err != nil {
-				return failLookup(args[0], err)
+				return failLookupStore(ls.store, args[0], err)
 			}
 			svcs, err := ls.store.ListServices()
 			if err != nil {

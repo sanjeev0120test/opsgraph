@@ -197,6 +197,14 @@ func newDoctorCmd() *cobra.Command {
 				cmd.Printf("\nsummary: %d ok, %d warn, %d fail\n", out.OK, out.Warn, out.Fail)
 			}
 			if out.Fail > 0 {
+				if format != "json" {
+					for _, c := range out.Checks {
+						if c.Name == "k8s_snapshot" && c.Status == "fail" {
+							cmd.Printf("next: %s\n     then opsgraph init --k8s k8s-snapshot.yaml --force && opsgraph ask\n", k8sDumpCmd)
+							break
+						}
+					}
+				}
 				return fail(1, "doctor found %d failure(s)", out.Fail)
 			}
 			return nil

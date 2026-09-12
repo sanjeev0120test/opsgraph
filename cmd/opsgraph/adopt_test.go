@@ -32,10 +32,25 @@ func TestAskHottestSelectsCheckout(t *testing.T) {
 	}
 }
 
+func TestInitMissingK8sPath(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, ".opsgraph.yaml")
+	_, errOut, code := runRoot(t, "init", "--out", out, "--k8s", filepath.Join(dir, "missing.yaml"))
+	if code != 1 {
+		t.Fatalf("missing dump must fail init: exit=%d stderr=%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "k8s path") || !strings.Contains(errOut, "kubectl get") {
+		t.Fatalf("must tell them to dump first:\n%s", errOut)
+	}
+}
+
 func TestInitWritesConfig(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, ".opsgraph.yaml")
 	snap := filepath.Join(dir, "k8s-snapshot.yaml")
+	if err := os.WriteFile(snap, []byte("kind: List\nitems: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	stdout, stderr, code := runRoot(t, "init", "--out", out, "--k8s", snap, "--git", ".")
 	if code != 0 {
 		t.Fatalf("init exit=%d stderr=%s stdout=%s", code, stderr, stdout)

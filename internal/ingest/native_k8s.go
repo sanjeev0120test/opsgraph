@@ -83,7 +83,7 @@ func normalizeKind(kind string) string {
 // per-node agents. Dropping any of them hides an outage behind "service not found".
 func isWorkloadKind(kind string) bool {
 	switch normalizeKind(kind) {
-	case "deployment", "statefulset", "daemonset", "job":
+	case "deployment", "statefulset", "daemonset", "job", "cronjob":
 		return true
 	}
 	return false
@@ -171,6 +171,7 @@ func loadK8sSnapshot(fsys fs.FS, depFile, evFile string) (k8sDeployments, k8sEve
 			return nil
 		}
 		deps.Deployments = append(deps.Deployments, d.Deployments...)
+		deps.leftoverRS = append(deps.leftoverRS, d.leftoverRS...)
 		evs.Events = append(evs.Events, e.Events...)
 		stats.merge(st)
 		return nil
@@ -215,11 +216,18 @@ func fillMissingDeploymentServiceIDs(deps *k8sDeployments) {
 	if deps == nil {
 		return
 	}
-	for i := range deps.Deployments {
-		if strings.TrimSpace(deps.Deployments[i].ServiceID) != "" {
-			continue
+	fill := func(list []k8sDeployment) {
+		for i := range list {
+			if strings.TrimSpace(list[i].ServiceID) != "" {
+				continue
+			}
+			list[i].ServiceID = inferServiceID(list[i].Kind, list[i].Name, nil)
 		}
-		deps.Deployments[i].ServiceID = inferServiceID(deps.Deployments[i].Kind, deps.Deployments[i].Name, nil)
+	}
+	fill(deps.Deployments)
+	fill(deps.leftoverRS)
+	if len(deps.Deployments) == 0 && len(deps.leftoverRS) > 0 {
+		deps.Deployments = deps.leftoverRS
 	}
 }
 
@@ -244,7 +252,7 @@ func looksNativeK8s(data []byte) bool {
 			return false
 		}
 		kind := normalizeKind(probe.Kind)
-		if kind == "list" || kind == "event" || isWorkloadKind(kind) {
+		if kind == "list" || kind == "event" || kind == "replicaset" || isWorkloadKind(kind) {
 			sawNative = true
 		}
 	}
@@ -283,6 +291,10 @@ func collectNative(deps *k8sDeployments, evs *k8sEvents, stats *k8sSnapshotStats
 		if d, ok := nativeToWorkload(obj); ok {
 			deps.Deployments = append(deps.Deployments, d)
 		}
+	case kind == "replicaset":
+		if d, ok := nativeToWorkload(obj); ok {
+			deps.leftoverRS = append(deps.leftoverRS, d)
+		}
 	case kind == "event":
 		if e, ok := nativeToEvent(obj); ok {
 			evs.Events = append(evs.Events, e)
@@ -317,6 +329,10 @@ func nativeToWorkload(o nativeObject) (k8sDeployment, bool) {
 func workloadReplicas(o nativeObject, kind string) (desired, ready int) {
 	if kind == "daemonset" {
 		return o.Status.DesiredNumberScheduled, o.Status.NumberReady
+	}
+	if kind == "cronjob" {
+		// Spec-only: last run is unknown until a Job/Event is in the dump.
+		return 0, 0
 	}
 	if kind == "job" {
 		desired = 1

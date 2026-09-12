@@ -31,7 +31,7 @@ func Table(w io.Writer, res model.AskResult) error {
 		p("   owner: %s", ownerLine(res.Owner))
 	}
 	p("\n")
-	p("WINDOW    last %s (as of %s)\n", res.Window, res.GeneratedAt.Format(time.RFC3339))
+	p("WINDOW    last %s (as of %s; times are UTC)\n", res.Window, res.GeneratedAt.UTC().Format(time.RFC3339))
 
 	if len(res.Changes) == 0 {
 		p("CHANGES   none in window\n")
@@ -122,6 +122,10 @@ func Table(w io.Writer, res model.AskResult) error {
 	}
 	for i, r := range res.Recommendations {
 		p("          %d. %s\n", i+1, r)
+	}
+	if res.Service.ID != "" {
+		p("          cmds: opsgraph blast %s · opsgraph impact %s · opsgraph handoff %s\n",
+			res.Service.ID, res.Service.ID, res.Service.ID)
 	}
 
 	if res.AISummary != "" {

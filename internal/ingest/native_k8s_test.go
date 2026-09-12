@@ -638,6 +638,122 @@ lastTimestamp: "2026-07-31T11:50:00Z"
 	}
 }
 
+func TestWorkloadNameBecomesAlias(t *testing.T) {
+	root := t.TempDir()
+	body := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  labels:
+    app: checkout
+spec:
+  replicas: 1
+status:
+  readyReplicas: 1
+`
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml",
+		time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC), k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetServiceByNameOrAlias("checkout-api")
+	if err != nil {
+		t.Fatalf("pager name checkout-api must resolve: %v", err)
+	}
+	if got.ID != "checkout" {
+		t.Fatalf("id=%q", got.ID)
+	}
+}
+
+func TestCronJobCreatesUnknownService(t *testing.T) {
+	data := []byte(`
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: billing-settle
+  namespace: shop
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps.Deployments) != 1 || deps.Deployments[0].ServiceID != "billing-settle" {
+		t.Fatalf("cronjob: %+v", deps.Deployments)
+	}
+	if deploymentHealth(deps.Deployments[0].Desired, deps.Deployments[0].Ready) != "unknown" {
+		t.Fatalf("cronjob must be unknown without a Job run: %+v", deps.Deployments[0])
+	}
+}
+
+func TestIngestReplicaSetOnlyDump(t *testing.T) {
+	root := t.TempDir()
+	body := `
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: checkout-7d9f8c4b5d
+  labels:
+    app: checkout
+spec:
+  replicas: 2
+status:
+  readyReplicas: 0
+`
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml",
+		time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC), k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := s.GetService("checkout")
+	if err != nil {
+		t.Fatalf("RS-only dump must create checkout: %v", err)
+	}
+	if svc.Health != "unhealthy" {
+		t.Fatalf("health=%q", svc.Health)
+	}
+}
+
+func TestReplicaSetOnlyDumpBecomesWorkload(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: checkout-7d9f8c4b5d
+  labels:
+    app: checkout
+spec:
+  replicas: 2
+status:
+  readyReplicas: 0
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps.leftoverRS) != 1 {
+		t.Fatalf("leftover RS: %+v", deps.leftoverRS)
+	}
+	fillMissingDeploymentServiceIDs(&deps)
+	if len(deps.Deployments) != 1 || deps.Deployments[0].ServiceID != "checkout" {
+		t.Fatalf("orphan RS should become checkout: %+v", deps.Deployments)
+	}
+}
+
 func TestSnapshotStatsSummary(t *testing.T) {
 	stats := k8sSnapshotStats{}
 	stats.observe("CronJob")

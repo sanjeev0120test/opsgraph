@@ -20,6 +20,8 @@ import (
 
 type k8sDeployments struct {
 	Deployments []k8sDeployment `yaml:"deployments"`
+	// leftoverRS are ReplicaSets kept only when the dump has no other workload.
+	leftoverRS []k8sDeployment
 }
 
 type k8sDeployment struct {
@@ -104,7 +106,8 @@ func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time
 	// fleet; say what was in the file and which kinds carry health.
 	if stats.Native && len(deps.Deployments) == 0 {
 		fmt.Fprintf(os.Stderr,
-			"warning: kubernetes snapshot has no Deployment/StatefulSet/DaemonSet/Job workloads (found: %s)\n",
+			"warning: kubernetes snapshot has no Deployment/StatefulSet/DaemonSet/Job/CronJob workloads (found: %s)\n"+
+				"next: kubectl get deploy,statefulset,daemonset,job,event -o yaml > k8s-snapshot.yaml\n",
 			stats.summary())
 	}
 	skippedDep := 0
@@ -244,7 +247,23 @@ func applyDeploymentHealth(s *store.Store, d k8sDeployment) error {
 	}
 	svc.Health = mergeHealth(svc.Health, health, svc.Sources)
 	svc.Sources = addSource(svc.Sources, "kubernetes")
+	if name := strings.TrimSpace(d.Name); name != "" && !strings.EqualFold(name, svc.ID) {
+		svc.Aliases = addAlias(svc.Aliases, name)
+	}
 	return s.UpsertService(*svc)
+}
+
+func addAlias(aliases []string, a string) []string {
+	a = strings.TrimSpace(a)
+	if a == "" {
+		return aliases
+	}
+	for _, x := range aliases {
+		if strings.EqualFold(x, a) {
+			return aliases
+		}
+	}
+	return append(aliases, a)
 }
 
 // ensureEventService makes Job/CronJob (and other) events askable. Existing

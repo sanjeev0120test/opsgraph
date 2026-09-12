@@ -45,6 +45,11 @@ func newInitCmd() *cobra.Command {
 			}
 			k8sPath := strings.TrimSpace(k8s)
 			k8sEnabled := k8sPath != ""
+			if k8sEnabled {
+				if _, err := os.Stat(k8sPath); err != nil {
+					return fail(1, "k8s path %q missing; run:\n  %s", k8sPath, k8sDumpCmd)
+				}
+			}
 			body := renderInitYAML(gitPath, k8sEnabled, k8sPath)
 			if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
 				return fail(2, "write %s: %v", out, err)

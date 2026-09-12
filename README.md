@@ -43,7 +43,7 @@ pack. The SHA-256 is stable across Windows, macOS, and Linux.
 - **The same answer twice.** Fixture clock + sorted JSON. `prove` checks it.
 - **Handoff is a file**, not a chat log. Email `incident.opsgraph`.
 - **Kubernetes as it actually runs.** Deployments, StatefulSets, DaemonSets,
-  and Events. A database at 0/3 ready is a service, not silence.
+  Jobs, and Events. A database at 0/3 ready is a service, not silence.
 - **Offline by default.** No required secrets. Optional AI is local Ollama only.
 
 ## What it is / is not
@@ -78,7 +78,7 @@ file with `CGO_ENABLED=0`.
 | Capability | What you get |
 |---|---|
 | Zero-catalog ask | Hottest service from a cwd `k8s-snapshot.yaml` |
-| Workloads | Deployment, StatefulSet, DaemonSet + Events |
+| Workloads | Deployment, StatefulSet, DaemonSet, Job + Events |
 | Blast / impact | 1-hop and recursive downstream |
 | Runbooks | Markdown checks, inferred if unmarked |
 | Pack / prove / delta | Emailable, hash-stable, replayable |
@@ -267,8 +267,9 @@ or config error.
 
 | Situation | What happens |
 |---|---|
-| No dump, no fixture, empty store | Exit 2, tells you to dump / ingest / `--fixture` |
-| Dump has only Services/CronJobs | Stderr lists kinds found; no fake healthy fleet |
+| No dump, no fixture | Exit 2, tells you to dump / ingest / `--fixture` |
+| Empty `--data-dir` store | Exit 1 (`empty store`) |
+| Dump has only Services/ConfigMaps | Stderr lists kinds found + the kubectl dump line |
 | Prom/AM scrape fails | Hard error; `ask` falls back to populated `state.db` |
 | Plugin fails or times out | Hard error, stderr quoted |
 | Ollama missing with `--ai` | Deterministic result + "AI unavailable" |

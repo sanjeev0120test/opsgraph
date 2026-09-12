@@ -17,7 +17,7 @@ func pickHottestService(ls *loadedStore, since time.Duration) (id string, sc int
 		return "", 0, err
 	}
 	if len(svcs) == 0 {
-		return "", 0, fmt.Errorf("no services to auto-select; pass a service name")
+		return "", 0, fmt.Errorf("no services to auto-select; dump needs deploy,statefulset,daemonset, or job\nnext: %s", k8sDumpCmd)
 	}
 	type row struct {
 		id    string

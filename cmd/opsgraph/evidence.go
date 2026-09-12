@@ -64,7 +64,7 @@ func newEvidenceCmd() *cobra.Command {
 			if service != "" {
 				svc, err := ls.store.GetServiceByNameOrAlias(service)
 				if err != nil {
-					return failLookup(service, err)
+					return failLookupStore(ls.store, service, err)
 				}
 				evs, err = ls.store.ListEvidenceForService(svc.ID)
 				if err != nil {

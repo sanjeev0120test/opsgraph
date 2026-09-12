@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sanjeev0120test/opsgraph/internal/config"
 )
@@ -55,10 +56,27 @@ func detectCwdK8s(wd string) (string, bool) {
 		}
 	}
 	k8sDir := filepath.Join(wd, "k8s")
-	if cwdDir(k8sDir) {
+	if cwdDir(k8sDir) && k8sDirHasYAML(k8sDir) {
 		return k8sDir, true
 	}
 	return "", false
+}
+
+func k8sDirHasYAML(dir string) bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		n := strings.ToLower(e.Name())
+		if strings.HasSuffix(n, ".yaml") || strings.HasSuffix(n, ".yml") {
+			return true
+		}
+	}
+	return false
 }
 
 func detectCwdGitLayout(wd string) bool {
