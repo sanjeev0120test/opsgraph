@@ -273,6 +273,41 @@ func TestParseNodeEventDoesNotInventService(t *testing.T) {
 	}
 }
 
+func TestParseCronJobAndJobEventsMapToService(t *testing.T) {
+	cron := []byte("" +
+		"apiVersion: v1\nkind: Event\nmetadata:\n  name: billing.17f8c\n" +
+		"involvedObject:\n  kind: CronJob\n  name: billing-settle\nreason: SawMiss\nmessage: missed run\n")
+	_, evs, _, err := parseNativeK8s(cron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.Events) != 1 || evs.Events[0].ServiceID != "billing-settle" {
+		t.Fatalf("CronJob events should map: %+v", evs.Events)
+	}
+
+	job := []byte("" +
+		"apiVersion: events.k8s.io/v1\nkind: Event\nmetadata:\n  name: billing.job\n" +
+		"regarding:\n  kind: Job\n  name: billing-settle-28654321\nnote: backoff limit exceeded\n")
+	_, evs, _, err = parseNativeK8s(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.Events) != 1 || evs.Events[0].ServiceID != "billing-settle" {
+		t.Fatalf("CronJob Job timestamp should strip: %+v", evs.Events)
+	}
+
+	named := []byte("" +
+		"apiVersion: v1\nkind: Event\nmetadata:\n  name: migrate.1\n" +
+		"involvedObject:\n  kind: Job\n  name: migrate-1\nreason: Completed\nmessage: done\n")
+	_, evs, _, err = parseNativeK8s(named)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.Events) != 1 || evs.Events[0].ServiceID != "migrate-1" {
+		t.Fatalf("hand-named Job must keep short suffix: %+v", evs.Events)
+	}
+}
+
 func TestParseEventWithoutObjectRefDoesNotInventService(t *testing.T) {
 	orphan := []byte("" +
 		"apiVersion: events.k8s.io/v1\nkind: Event\nmetadata:\n  name: checkout.17f8c\n  namespace: shop\nreason: Unhealthy\nnote: dropped\n")
@@ -396,6 +431,15 @@ func TestInferServiceIDStatefulSetPodOrdinal(t *testing.T) {
 	// A Deployment pod keeps its numeric name segment; only the hashes go.
 	if got := inferServiceID("Pod", "web-2-7d9f8c4b5d-xk2n1", nil); got != "web-2" {
 		t.Fatalf("deployment pod must keep name digits: got %q", got)
+	}
+	if got := inferServiceID("Job", "billing-settle-28654321", nil); got != "billing-settle" {
+		t.Fatalf("cronjob job timestamp: got %q", got)
+	}
+	if got := inferServiceID("Job", "migrate-1", nil); got != "migrate-1" {
+		t.Fatalf("short job suffix must stay: got %q", got)
+	}
+	if got := inferServiceID("CronJob", "billing-settle", nil); got != "billing-settle" {
+		t.Fatalf("cronjob name: got %q", got)
 	}
 }
 

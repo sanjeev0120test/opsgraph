@@ -16,8 +16,9 @@ import (
 
 // Store wraps a single-connection SQLite database.
 type Store struct {
-	db   *sql.DB
-	path string
+	db        *sql.DB
+	path      string
+	ephemeral bool
 }
 
 // Open opens (creating if needed) a persistent store under dataDir/state.db.
@@ -25,7 +26,7 @@ func Open(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir %q: %w", dataDir, err)
 	}
-	return open(filepath.Join(dataDir, "state.db"))
+	return open(filepath.Join(dataDir, "state.db"), false)
 }
 
 // OpenTemp opens an isolated store in a temp directory. The returned cleanup
@@ -35,7 +36,7 @@ func OpenTemp() (*Store, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	s, err := open(filepath.Join(dir, "state.db"))
+	s, err := open(filepath.Join(dir, "state.db"), true)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, nil, err
@@ -52,7 +53,7 @@ func OpenTemp() (*Store, func(), error) {
 // any statement. Path is still a filesystem path; the driver splits on '?'.
 const sqliteDefensiveQuery = "?_defensive=1"
 
-func open(dbPath string) (*Store, error) {
+func open(dbPath string, ephemeral bool) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath+sqliteDefensiveQuery)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -61,17 +62,24 @@ func open(dbPath string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
-	for _, pragma := range []string{
+	pragmas := []string{
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA busy_timeout=5000",
-		"PRAGMA synchronous=NORMAL",
-	} {
+	}
+	if ephemeral {
+		// Fixture/demo/test DBs are discarded. fsync (FlushFileBuffers) is what
+		// blew the Windows -short 4m budget under Defender on 0c1a626.
+		pragmas = append(pragmas, "PRAGMA synchronous=OFF", "PRAGMA journal_mode=MEMORY")
+	} else {
+		pragmas = append(pragmas, "PRAGMA synchronous=NORMAL")
+	}
+	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("apply %q: %w", pragma, err)
 		}
 	}
-	s := &Store{db: db, path: dbPath}
+	s := &Store{db: db, path: dbPath, ephemeral: ephemeral}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -96,7 +104,7 @@ func (s *Store) ReplaceFromFile(srcDB string) error {
 		return fmt.Errorf("replace store: close: %w", err)
 	}
 	reopenPrev := func(cause error) error {
-		reopened, err := open(s.path)
+		reopened, err := open(s.path, s.ephemeral)
 		if err != nil {
 			return fmt.Errorf("%w (also failed to reopen previous store: %v)", cause, err)
 		}
@@ -140,11 +148,11 @@ func (s *Store) ReplaceFromFile(srcDB string) error {
 		}
 		return reopenPrev(fmt.Errorf("replace store: rename: %w", err))
 	}
-	reopened, err := open(s.path)
+	reopened, err := open(s.path, s.ephemeral)
 	if err != nil {
 		if _, st := os.Stat(bak); st == nil {
 			_ = os.Rename(bak, s.path)
-			if prev, perr := open(s.path); perr == nil {
+			if prev, perr := open(s.path, s.ephemeral); perr == nil {
 				s.db = prev.db
 				return fmt.Errorf("replace store: reopen: %w (restored backup)", err)
 			}

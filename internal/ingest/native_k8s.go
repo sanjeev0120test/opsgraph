@@ -87,7 +87,7 @@ func isWorkloadKind(kind string) bool {
 
 func eventObjectKindAllowed(kind string) bool {
 	switch normalizeKind(kind) {
-	case "pod", "replicaset", "deployment", "statefulset", "daemonset", "service", "job":
+	case "pod", "replicaset", "deployment", "statefulset", "daemonset", "service", "job", "cronjob":
 		return true
 	}
 	return false
@@ -336,7 +336,7 @@ func nativeToEvent(o nativeObject) (k8sEvent, bool) {
 		return k8sEvent{}, false
 	}
 	// Node/ConfigMap/Lease events are common in `kubectl get event` and must
-	// not become fleet services. Labels still map; workload/Service/Job refs too.
+	// not become fleet services. Labels still map; workload/Service/Job/CronJob refs too.
 	if !eventObjectKindAllowed(ref.Kind) && !hasAppLabel(o.Metadata.Labels) {
 		return k8sEvent{}, false
 	}
@@ -401,8 +401,31 @@ func inferServiceID(kind, name string, labels map[string]string) string {
 		name = stripped
 	case "replicaset":
 		name = stripK8sHashSuffix(name)
+	case "job":
+		// CronJob-created Jobs are <cronjob>-<epoch-minutes> (8+ digits).
+		name = stripCronJobTimestamp(name)
 	}
 	return name
+}
+
+// stripCronJobTimestamp drops the scheduled-time suffix CronJob adds to Jobs
+// (billing-settle-28654321 → billing-settle). Short numeric tails like
+// migrate-1 stay put so a hand-named Job is not renamed.
+func stripCronJobTimestamp(name string) string {
+	i := strings.LastIndex(name, "-")
+	if i <= 0 || i == len(name)-1 {
+		return name
+	}
+	suf := name[i+1:]
+	if len(suf) < 8 {
+		return name
+	}
+	for _, r := range suf {
+		if r < '0' || r > '9' {
+			return name
+		}
+	}
+	return name[:i]
 }
 
 // stripOrdinalSuffix drops the StatefulSet pod ordinal (postgres-0 → postgres).

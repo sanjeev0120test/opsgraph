@@ -229,6 +229,32 @@ func TestListEvidenceSorted(t *testing.T) {
 	}
 }
 
+func TestOpenTempSkipsFsync(t *testing.T) {
+	s := newTestStore(t)
+	var sync int
+	if err := s.db.QueryRow(`PRAGMA synchronous`).Scan(&sync); err != nil {
+		t.Fatal(err)
+	}
+	if sync != 0 {
+		t.Fatalf("temp store synchronous=%d want 0 (OFF)", sync)
+	}
+}
+
+func TestOpenKeepsSynchronousNormal(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	var sync int
+	if err := s.db.QueryRow(`PRAGMA synchronous`).Scan(&sync); err != nil {
+		t.Fatal(err)
+	}
+	if sync != 1 {
+		t.Fatalf("persistent store synchronous=%d want 1 (NORMAL)", sync)
+	}
+}
+
 func TestDependenciesBothDirections(t *testing.T) {
 	s := newTestStore(t)
 	_ = s.UpsertDependency(model.Dependency{FromServiceID: "checkout", ToServiceID: "auth", Type: "http"})
