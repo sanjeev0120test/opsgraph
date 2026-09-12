@@ -96,11 +96,6 @@ func failAskStore(s *store.Store, err error) error {
 	return fail(2, "%v", err)
 }
 
-// failLookup maps store service lookup errors (not found / ambiguous -> 1).
-func failLookup(query string, err error) error {
-	return failLookupNames(query, err, nil)
-}
-
 func failLookupStore(s *store.Store, query string, err error) error {
 	return failLookupNames(query, err, namesFromStore(s))
 }
