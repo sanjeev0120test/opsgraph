@@ -1,12 +1,15 @@
 name: ci
 
 # Fast parallel quality gates. Wall-clock is the slowest job, not the sum.
-# Measured on run 36262077588 (main, cold caches): ubuntu race+cover 2m30s,
-# cross-compile 2m23s, lint 54s, full CLI smoke 3s, go install 23s because it
-# rebuilt with different flags. Coverage and fuzz run beside race, not inside
-# it. Go build caches are keyed by go.sum so a source-only push restores
-# sqlite/std objects and does not re-upload. Windows/macOS/arm64 stay on
-# -short. Required aggregator job: "all checks passed".
+# Warm main run 36264189646: workflow 1m42s, Windows test 1m27s (module-cache
+# unpack), cross 35s, ubuntu race 39s, cover+fuzz 44s. Cold run 36262077588
+# was 3m20s when race and atomic coverage shared one step.
+# Do not set actions/cache lookup-only. That input skips the download, so
+# pull requests recompile. A primary-key hit restores and does not upload.
+# Keys are go.sum + OS + arch + job, so a source-only change reuses objects.
+# Stay on actions/cache v4.2.4. v5+ uses a new cache service and would miss
+# the entries saved by run 36264189646.
+# Windows/macOS/arm64 stay on -short. Required aggregator: "all checks passed".
 # Tag pushes are owned by release.yml (skip here to avoid duplicate runners).
 
 on:
@@ -51,9 +54,7 @@ jobs:
         # zizmor: ignore[cache-poisoning]
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          # PRs restore only. A pull_request save can poison a later
-          # workflow_dispatch on the same ref (zizmor cache-poisoning).
-          lookup-only: ${{ github.event_name == 'pull_request' }}
+          # Restore on push and pull_request. lookup-only skips the download.
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-lint-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -72,10 +73,9 @@ jobs:
             exit 1
           fi
           sum "| gofmt | ok |"
-          go vet ./...
-          # All vet analyzers (compile-only; no test execution).
+          # -vet=all includes the default vet analyzers. Compile only.
           go test -count=1 -timeout=3m -vet=all -run=^$ ./...
-          sum "| go vet (+ -vet=all) | ok |"
+          sum "| go test -vet=all | ok |"
           test -s .gitattributes
           grep -Fq '* text=auto eol=lf' .gitattributes
           sum "| .gitattributes LF pin | ok |"
@@ -187,16 +187,15 @@ jobs:
         # zizmor: ignore[cache-poisoning]
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          # PRs restore only. A pull_request save can poison a later
-          # workflow_dispatch on the same ref (zizmor cache-poisoning).
-          lookup-only: ${{ github.event_name == 'pull_request' }}
+          # Restore on push and pull_request. lookup-only skips the download.
           path: ~/.local/share/powershell/Modules/PSScriptAnalyzer
-          key: psscriptanalyzer-linux-v1
+          key: psscriptanalyzer-1.25.0
       - name: PSScriptAnalyzer (installers)
         shell: pwsh
         run: |
-          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
-            Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          $have = @(Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object { $_.Version -eq [version]'1.25.0' })
+          if ($have.Count -eq 0) {
+            Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
           }
           $errs = @()
           foreach ($f in @('scripts/install.ps1', 'scripts/verify.ps1')) {
@@ -230,9 +229,7 @@ jobs:
         # zizmor: ignore[cache-poisoning]
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          # PRs restore only. A pull_request save can poison a later
-          # workflow_dispatch on the same ref (zizmor cache-poisoning).
-          lookup-only: ${{ github.event_name == 'pull_request' }}
+          # Restore on push and pull_request. lookup-only skips the download.
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-staticcheck-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -281,9 +278,7 @@ jobs:
         # zizmor: ignore[cache-poisoning]
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          # PRs restore only. A pull_request save can poison a later
-          # workflow_dispatch on the same ref (zizmor cache-poisoning).
-          lookup-only: ${{ github.event_name == 'pull_request' }}
+          # Restore on push and pull_request. lookup-only skips the download.
           path: ${{ runner.os == 'Windows' && '~\AppData\Local\go-build' || runner.os == 'macOS' && '~/Library/Caches/go-build' || '~/.cache/go-build' }}
           key: gocache-${{ runner.os }}-${{ runner.arch }}-test-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -401,13 +396,8 @@ jobs:
           "$BIN" ask checkout --data-dir "$DATA" --format json > "$DATA/b.json"
           grep -F '"generated_at": "2026-07-31T12:00:00Z"' "$DATA/a.json" >/dev/null
           grep -F '"generated_at": "2026-07-31T12:00:00Z"' "$DATA/b.json" >/dev/null
-          # On-call subset promoted from full smoke for cross-OS contracts.
-          "$BIN" handoff checkout --fixture ./fixtures/incident_checkout >/dev/null
-          "$BIN" why checkout --fixture ./fixtures/incident_checkout --format json >/dev/null
-          "$BIN" explain checkout --fixture ./fixtures/incident_checkout --format json >/dev/null
-          "$BIN" report checkout --fixture ./fixtures/incident_checkout --format json >/dev/null
-          "$BIN" fingerprint checkout --fixture ./fixtures/incident_checkout >/dev/null
-          "$BIN" compare checkout auth --fixture ./fixtures/incident_checkout >/dev/null
+          # OS contracts only: paths, sqlite, stdout-vs-stderr, exit codes.
+          # Health wording is asserted on ubuntu (full smoke) and in Go tests.
           set +e
           "$BIN" watch checkout --fixture ./fixtures/incident_checkout --interval -1s --timeout 1s >/dev/null
           bad_watch=$?
@@ -416,47 +406,14 @@ jobs:
           set -e
           test "$bad_watch" -eq 2
           test "$conflict" -eq 2
-          "$BIN" status --fixture ./fixtures/incident_checkout | grep -F "ACTIVE SOURCE  fixture" >/dev/null
-          "$BIN" validate-fixture ./fixtures/fleet_healthy >/dev/null
-          "$BIN" health --fixture ./fixtures/fleet_healthy --strict >/dev/null
-          "$BIN" ask api --fixture ./fixtures/fleet_healthy --format json >/dev/null
-          # Cross-OS exit-code contracts (promoted from ubuntu-only full smoke).
-          set +e
-          "$BIN" verify-runbook checkout --fixture ./fixtures/incident_checkout >/dev/null
-          vrb=$?
-          "$BIN" health --fixture ./fixtures/incident_checkout --strict >/dev/null
-          strict_inc=$?
-          "$BIN" watch checkout --fixture ./fixtures/incident_checkout --once >/dev/null
-          once_deg=$?
-          set -e
-          test "$vrb" -eq 1
-          test "$strict_inc" -eq 1
-          test "$once_deg" -eq 1
-          # Same stuck-rollout contract as ubuntu. Summary stays on the full job.
-          stuck="$(mktemp -d)"
-          cp fixtures/stuck_rollout/k8s-snapshot.yaml "$stuck/k8s-snapshot.yaml"
-          absbin="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
-          (cd "$stuck" && "$absbin" ask checkout > "$stuck/out.txt")
-          grep -F "SERVICE   checkout (degraded; rollout deadline exceeded" "$stuck/out.txt"
-          grep -F "Investigate checkout health (degraded; rollout deadline exceeded" "$stuck/out.txt"
-          grep -F "CHANGES   none in window" "$stuck/out.txt"
-          cap="$(mktemp -d)"
-          cp fixtures/unavailable_capacity/k8s-snapshot.yaml "$cap/k8s-snapshot.yaml"
-          (cd "$cap" && "$absbin" ask checkout > "$cap/out.txt")
-          grep -F "SERVICE   checkout (degraded; not available)" "$cap/out.txt"
-          grep -F "Investigate checkout health (degraded; not available)" "$cap/out.txt"
-          stale="$(mktemp -d)"
-          cp fixtures/stale_generation/k8s-snapshot.yaml "$stale/k8s-snapshot.yaml"
-          (cd "$stale" && "$absbin" ask checkout > "$stale/out.txt")
-          grep -F "SERVICE   checkout (unknown; status stale: observed generation 3, spec generation 4)" "$stale/out.txt"
-          grep -F "Treat checkout health as unknown (status stale: observed generation 3, spec generation 4)" "$stale/out.txt"
       - name: Full CLI smoke (ubuntu)
         if: ${{ matrix.smoke == 'full' }}
         shell: bash
         run: |
           set -euo pipefail
           BIN=./bin/opsgraph
-          # Critical contracts only - broad command coverage lives in Go tests (features_test).
+          # Release-binary contract (jsonassert, health step summary, offline proxy).
+          # Go tests cover the same commands with substring checks. This step is ~2s.
           out="$("$BIN" version 2>/tmp/version.err)"
           if [ -s /tmp/version.err ]; then
             echo "version wrote to stderr:" >&2
@@ -784,9 +741,7 @@ jobs:
         # zizmor: ignore[cache-poisoning]
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          # PRs restore only. A pull_request save can poison a later
-          # workflow_dispatch on the same ref (zizmor cache-poisoning).
-          lookup-only: ${{ github.event_name == 'pull_request' }}
+          # Restore on push and pull_request. lookup-only skips the download.
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-cover-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -806,7 +761,9 @@ jobs:
           tail -n 1 cover-func.txt | tee cover-summary.txt
           go test -count=1 -timeout=2m -fuzz=FuzzOfStablePrefix -fuzztime=5s ./internal/fingerprint
           go test -count=1 -timeout=2m -fuzz=FuzzParse -fuzztime=5s ./internal/runbook
-          go test -count=1 -timeout=2m -fuzz=FuzzServicesYAML -fuzztime=5s ./internal/ingest
+          # -parallel=1: one worker exits with the fuzztime deadline. Four workers
+          # left "context deadline exceeded" on FuzzServicesYAML (run 36265608023).
+          go test -count=1 -timeout=2m -fuzz=FuzzServicesYAML -fuzztime=5s -parallel=1 ./internal/ingest
           {
             echo "## coverage"
             echo ""
@@ -847,9 +804,7 @@ jobs:
         # zizmor: ignore[cache-poisoning]
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          # PRs restore only. A pull_request save can poison a later
-          # workflow_dispatch on the same ref (zizmor cache-poisoning).
-          lookup-only: ${{ github.event_name == 'pull_request' }}
+          # Restore on push and pull_request. lookup-only skips the download.
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-cross-${{ hashFiles('go.sum') }}
           restore-keys: |

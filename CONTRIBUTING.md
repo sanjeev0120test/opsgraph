@@ -9,10 +9,10 @@ Optional local smoke (keeps the laptop light; no `-race`):
 - Windows: `pwsh scripts/verify.ps1` (`go test -short` — skips the 21-loop prove burn)
 - Unix: `bash scripts/verify.sh` or `make quick`
 
-CI: ubuntu runs the full suite (`-race`, `./...`, 21-loop prove, module-graph rebuilds).
+CI: ubuntu runs the full suite (`-race`, `./...`, coverage floors, 21-loop prove, module-graph rebuilds).
 Windows/macOS/arm64 use `-short` on OS-sensitive packages only (`cmd/opsgraph`,
-`internal/store`, `internal/ingest`, `internal/config`) so the wall-clock stays
-on the ubuntu race job.
+`internal/store`, `internal/ingest`, `internal/config`). With a warm Go build
+cache the slowest job is Windows (module-cache unpack, then those tests).
 
 ## Fixtures
 
@@ -33,7 +33,7 @@ go run ./cmd/opsgraph test ./fixtures/incident_checkout --update
 - Fixture goldens are LF-only + structurally complete (`.gitattributes`, `scripts/check_lf.go`, `scripts/check_fixtures.go`)
 - After `go mod tidy`, builds use a locked module graph (`-mod=readonly -buildvcs=false`)
 - Release ldflags keep an empty Go build ID (`-buildid=`)
-- Lint runs `go vet` and compile-only `-vet=all`
+- Lint runs compile-only `go test -vet=all` (that includes the default vet analyzers)
 - `AskResult` / `VerifyResult` / nested machine JSON field sets are frozen in `internal/model`
 - CLI command surface + critical flags are frozen in `cmd/opsgraph`
 - Runbook check catalog, core exit-code matrix, demo↔fixture JSON parity, and `OPSGRAPH_*` env exclusivity are frozen
