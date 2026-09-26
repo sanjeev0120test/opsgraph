@@ -130,7 +130,8 @@ kubectl get deploy,statefulset,daemonset,job,event -o yaml > k8s-snapshot.yaml
 
 `ask` with no name picks the hottest service (apps over git folders and
 kube-system agents). StatefulSets, DaemonSets, and Jobs are first-class:
-`postgres` at 0/3 ready is `unhealthy`; a failed Job is `unhealthy`;
+`postgres` at 0/3 ready is `unhealthy`; a failed Job is `unhealthy`; a
+Deployment that is 3/3 ready but `ProgressDeadlineExceeded` is `degraded`;
 `ask billing-settle` works from Job events.
 
 ## Installation

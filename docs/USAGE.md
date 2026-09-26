@@ -85,9 +85,16 @@ existing config. `--git` defaults to `.`.
 
 Workload health comes from replica readiness: `spec.replicas` vs
 `status.readyReplicas` for Deployments and StatefulSets, and
-`status.desiredNumberScheduled` vs `status.numberReady` for DaemonSets. If a
-snapshot contains none of these kinds, `opsgraph` says so on stderr and lists
-the kinds it did find rather than reporting an empty fleet.
+`status.desiredNumberScheduled` vs `status.numberReady` for DaemonSets.
+A full ready count is not treated as healthy when a condition contradicts it:
+`Progressing=False` / `ProgressDeadlineExceeded`, `ReplicaFailure=True`, or
+`Available=False` marks the service `degraded` (stderr names the workload and
+a `kubectl rollout status` command). `readyReplicas: 0` stays `unhealthy`.
+Scaled to zero (`replicas: 0`) stays `unknown`. A Job with `failed > 0` and
+`active > 0` is `degraded` (still retrying); `Failed=True` or `failed > 0`
+with nothing active is `unhealthy`. If a snapshot contains none of these
+kinds, `opsgraph` says so on stderr and lists the kinds it did find rather
+than reporting an empty fleet.
 
 ### `opsgraph prove`
 One-command offline proof. Ingests the built-in incident, writes a pack, replays

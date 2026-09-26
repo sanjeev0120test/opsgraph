@@ -63,7 +63,9 @@ type nativeDepStatus struct {
 
 type nativeCondition struct {
 	Type               string `yaml:"type"`
-	Status             string `yaml:"status"`
+	Status             any    `yaml:"status"`
+	Reason             string `yaml:"reason"`
+	Message            string `yaml:"message"`
 	LastUpdateTime     any    `yaml:"lastUpdateTime"`
 	LastTransitionTime any    `yaml:"lastTransitionTime"`
 }
@@ -308,20 +310,41 @@ func nativeToWorkload(o nativeObject) (k8sDeployment, bool) {
 		return k8sDeployment{}, false
 	}
 	kind := normalizeKind(o.Kind)
-	desired, ready := workloadReplicas(o, kind)
+	desired, ready, forceDegraded, note := assessWorkload(o)
 	ns := strings.TrimSpace(o.Metadata.Namespace)
 	if ns == "" {
 		ns = "default"
 	}
 	return k8sDeployment{
-		Kind:      kind,
-		Name:      name,
-		Namespace: ns,
-		ServiceID: inferServiceID(o.Kind, name, o.Metadata.Labels),
-		Desired:   desired,
-		Ready:     ready,
-		UpdatedAt: deploymentUpdatedAt(o),
+		Kind:          kind,
+		Name:          name,
+		Namespace:     ns,
+		ServiceID:     inferServiceID(o.Kind, name, o.Metadata.Labels),
+		Desired:       desired,
+		Ready:         ready,
+		UpdatedAt:     deploymentUpdatedAt(o),
+		forceDegraded: forceDegraded,
+		rolloutNote:   note,
 	}, true
+}
+
+// assessWorkload reads replica counters and conditions. A Deployment can keep
+// readyReplicas == spec.replicas on the old revision after ProgressDeadlineExceeded.
+// Treating that as healthy hides the failed rollout from ask and health --strict.
+func assessWorkload(o nativeObject) (desired, ready int, forceDegraded bool, note string) {
+	kind := normalizeKind(o.Kind)
+	desired, ready = workloadReplicas(o, kind)
+	switch kind {
+	case "job":
+		if jobStillRetrying(o, desired) {
+			return desired, ready, true, "retrying after pod failure"
+		}
+	case "deployment", "statefulset", "daemonset", "replicaset":
+		if ok, n := rolloutDegradedNote(o); ok && deploymentHealth(desired, ready) == "healthy" {
+			return desired, ready, true, n
+		}
+	}
+	return desired, ready, false, ""
 }
 
 // workloadReplicas reads per-kind replica counters. DaemonSets have no
@@ -345,10 +368,11 @@ func workloadReplicas(o nativeObject, kind string) (desired, ready int) {
 		if o.Status.Succeeded >= desired {
 			return desired, desired
 		}
-		if o.Status.Failed > 0 {
+		if jobTerminalFailure(o) {
 			return desired, 0
 		}
-		// In-progress or empty status: do not page.
+		// In progress, including a retry that still has active pods: do not page
+		// as fully down. assessWorkload marks the retry case degraded.
 		return desired, desired
 	}
 	desired = 1
@@ -394,6 +418,86 @@ func nativeToEvent(o nativeObject) (k8sEvent, bool) {
 		Message:   msg,
 		Type:      o.Type,
 	}, true
+}
+
+func jobStillRetrying(o nativeObject, desired int) bool {
+	if desired <= 0 || o.Status.Succeeded >= desired || jobTerminalFailure(o) {
+		return false
+	}
+	return o.Status.Failed > 0 && o.Status.Active > 0
+}
+
+// jobTerminalFailure is a finished Job that did not complete. A Failed=True
+// condition counts even when status.failed was omitted. Pods that failed while
+// status.active is still > 0 are retries, not a terminal failure.
+func jobTerminalFailure(o nativeObject) bool {
+	if condStatus(findCondition(o, "failed")) == "true" {
+		return true
+	}
+	return o.Status.Failed > 0 && o.Status.Active == 0
+}
+
+func findCondition(o nativeObject, typ string) any {
+	typ = strings.ToLower(strings.TrimSpace(typ))
+	for _, c := range o.Status.Conditions {
+		if strings.ToLower(strings.TrimSpace(c.Type)) == typ {
+			return c.Status
+		}
+	}
+	return nil
+}
+
+// condStatus accepts kubectl's quoted "True"/"False" and YAML 1.1 booleans
+// (unquoted true/false), which otherwise fail to decode into a string field.
+func condStatus(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strings.ToLower(strings.TrimSpace(t))
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	default:
+		return ""
+	}
+}
+
+// rolloutDegradedNote reports Deployment/StatefulSet/DaemonSet/ReplicaSet
+// conditions that contradict a full ready count. Phrases are ordered so the
+// evidence line is stable when several conditions match.
+func rolloutDegradedNote(o nativeObject) (bool, string) {
+	seen := map[string]bool{}
+	for _, c := range o.Status.Conditions {
+		typ := strings.ToLower(strings.TrimSpace(c.Type))
+		st := condStatus(c.Status)
+		reason := strings.TrimSpace(c.Reason)
+		switch typ {
+		case "progressing":
+			if st == "false" && strings.EqualFold(reason, "ProgressDeadlineExceeded") {
+				seen["rollout deadline exceeded"] = true
+			}
+		case "replicafailure":
+			if st == "true" {
+				seen["replica failure"] = true
+			}
+		case "available":
+			if st == "false" {
+				seen["not available"] = true
+			}
+		}
+	}
+	order := []string{"rollout deadline exceeded", "replica failure", "not available"}
+	var parts []string
+	for _, phrase := range order {
+		if seen[phrase] {
+			parts = append(parts, phrase)
+		}
+	}
+	if len(parts) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(parts, "; ")
 }
 
 func deploymentUpdatedAt(o nativeObject) time.Time {

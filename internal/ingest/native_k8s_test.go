@@ -767,6 +767,367 @@ func TestSnapshotStatsSummary(t *testing.T) {
 	}
 }
 
+func TestStuckRolloutDegradesFullReady(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: shop
+  labels:
+    app: checkout
+spec:
+  replicas: 3
+status:
+  replicas: 3
+  readyReplicas: 3
+  conditions:
+  - type: Progressing
+    status: "False"
+    reason: ProgressDeadlineExceeded
+    message: ReplicaSet "checkout-api-abc" has timed out progressing.
+    lastUpdateTime: "2026-07-31T11:40:00Z"
+  - type: Available
+    status: "True"
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps.Deployments) != 1 {
+		t.Fatalf("deployments: %+v", deps.Deployments)
+	}
+	d := deps.Deployments[0]
+	if d.Desired != 3 || d.Ready != 3 || !d.forceDegraded {
+		t.Fatalf("picture: %+v", d)
+	}
+	if d.health() != "degraded" {
+		t.Fatalf("health = %q", d.health())
+	}
+	if d.rolloutNote != "rollout deadline exceeded" {
+		t.Fatalf("note = %q", d.rolloutNote)
+	}
+}
+
+func TestAvailableFalseDegradesFullReady(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  conditions:
+  - type: Available
+    status: false
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := deps.Deployments[0]
+	if d.health() != "degraded" || d.rolloutNote != "not available" {
+		t.Fatalf("statefulset: health=%s note=%q", d.health(), d.rolloutNote)
+	}
+}
+
+func TestReplicaFailureAndDeadlineNoteOrder(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent
+status:
+  desiredNumberScheduled: 2
+  numberReady: 2
+  conditions:
+  - type: Available
+    status: "False"
+  - type: ReplicaFailure
+    status: "True"
+    reason: FailedCreate
+  - type: Progressing
+    status: "False"
+    reason: ProgressDeadlineExceeded
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := deps.Deployments[0]
+	if d.health() != "degraded" {
+		t.Fatalf("health = %q", d.health())
+	}
+	if d.rolloutNote != "rollout deadline exceeded; replica failure; not available" {
+		t.Fatalf("note = %q", d.rolloutNote)
+	}
+}
+
+func TestProgressingTrueStaysHealthy(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+spec:
+  replicas: 2
+status:
+  readyReplicas: 2
+  conditions:
+  - type: Progressing
+    status: "True"
+    reason: NewReplicaSetAvailable
+  - type: Available
+    status: "True"
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := deps.Deployments[0]
+	if d.health() != "healthy" || d.forceDegraded || d.rolloutNote != "" {
+		t.Fatalf("healthy deploy drifted: %+v", d)
+	}
+}
+
+func TestUnhealthyReplicasStayUnhealthyDespiteDeadline(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+spec:
+  replicas: 2
+status:
+  readyReplicas: 0
+  conditions:
+  - type: Progressing
+    status: "False"
+    reason: ProgressDeadlineExceeded
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps.Deployments[0].health() != "unhealthy" {
+		t.Fatalf("health = %q", deps.Deployments[0].health())
+	}
+}
+
+func TestScaledToZeroStaysUnknownWithStaleDeadline(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+spec:
+  replicas: 0
+status:
+  readyReplicas: 0
+  conditions:
+  - type: Progressing
+    status: "False"
+    reason: ProgressDeadlineExceeded
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps.Deployments[0].health() != "unknown" {
+		t.Fatalf("scaled to zero health = %q", deps.Deployments[0].health())
+	}
+}
+
+func TestJobRetryingIsDegraded(t *testing.T) {
+	data := []byte(`
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: billing-settle-28654321
+  labels:
+    app: billing-settle
+spec:
+  completions: 1
+status:
+  active: 1
+  failed: 1
+  succeeded: 0
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := deps.Deployments[0]
+	if d.Ready != 1 || d.health() != "degraded" || d.rolloutNote != "retrying after pod failure" {
+		t.Fatalf("retrying job: %+v health=%s", d, d.health())
+	}
+}
+
+func TestJobFailedConditionWithoutCount(t *testing.T) {
+	data := []byte(`
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+spec:
+  completions: 1
+status:
+  conditions:
+  - type: Failed
+    status: "True"
+    reason: BackoffLimitExceeded
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps.Deployments[0].health() != "unhealthy" || deps.Deployments[0].Ready != 0 {
+		t.Fatalf("condition-only failure: %+v", deps.Deployments[0])
+	}
+}
+
+func TestIngestStuckRolloutBeatsHealthySibling(t *testing.T) {
+	root := t.TempDir()
+	body := `
+apiVersion: v1
+kind: List
+items:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout-api
+    namespace: shop
+    labels:
+      app: checkout
+  spec:
+    replicas: 3
+  status:
+    readyReplicas: 3
+    conditions:
+    - type: Progressing
+      status: "False"
+      reason: ProgressDeadlineExceeded
+      lastUpdateTime: "2026-07-31T11:40:00Z"
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout-worker
+    namespace: shop
+    labels:
+      app: checkout
+  spec:
+    replicas: 1
+  status:
+    readyReplicas: 1
+`
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml",
+		time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC), k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := s.GetService("checkout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.Health != "degraded" {
+		t.Fatalf("health = %q", svc.Health)
+	}
+	if svc.Labels["opsgraph_rollout"] != "rollout deadline exceeded" {
+		t.Fatalf("label = %v", svc.Labels)
+	}
+	evs, err := s.ListAllEvidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summaries []string
+	for _, e := range evs {
+		summaries = append(summaries, e.Summary)
+	}
+	found := false
+	for _, sum := range summaries {
+		if strings.Contains(sum, "rollout deadline exceeded") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("evidence summaries = %v", summaries)
+	}
+	warn := stuckRolloutWarning(k8sDeployment{
+		Kind: "deployment", Name: "checkout-api", Namespace: "shop",
+		Desired: 3, Ready: 3, forceDegraded: true, rolloutNote: "rollout deadline exceeded",
+	})
+	if !strings.Contains(warn, "kubectl rollout status deploy/checkout-api -n shop") {
+		t.Fatalf("warning = %q", warn)
+	}
+	injected := stuckRolloutWarning(k8sDeployment{
+		Kind: "deployment", Name: "checkout; rm -rf /", Namespace: "shop\n",
+		Desired: 3, Ready: 3, forceDegraded: true, rolloutNote: "rollout deadline exceeded",
+	})
+	if strings.Contains(injected, "rm -rf") || strings.Contains(injected, "\n") {
+		t.Fatalf("warning must not carry a shell payload: %q", injected)
+	}
+}
+
+func TestIngestUnhealthySiblingBeatsStuckRollout(t *testing.T) {
+	root := t.TempDir()
+	body := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  labels:
+    app: checkout
+spec:
+  replicas: 2
+status:
+  readyReplicas: 2
+  conditions:
+  - type: Progressing
+    status: "False"
+    reason: ProgressDeadlineExceeded
+    lastUpdateTime: "2026-07-31T11:40:00Z"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-worker
+  labels:
+    app: checkout
+spec:
+  replicas: 2
+status:
+  readyReplicas: 0
+`
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if err := ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml",
+		time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC), k8sAllow{}); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := s.GetService("checkout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.Health != "unhealthy" {
+		t.Fatalf("health = %q", svc.Health)
+	}
+}
+
 func FuzzParseNativeK8s(f *testing.F) {
 	f.Add([]byte("kind: List\nitems: []\n"))
 	f.Add([]byte("kind: Deployment\nmetadata:\n  name: x\n"))
