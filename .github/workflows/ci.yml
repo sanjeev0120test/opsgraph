@@ -1,11 +1,12 @@
 name: ci
 
 # Fast parallel quality gates. Wall-clock is the slowest job, not the sum.
-# Ubuntu runs the full suite (race + 21-loop prove + module-graph rebuilds).
-# Windows/macOS/arm64 use -short on OS-sensitive packages only (CLI, store,
-# ingest, config). Ubuntu ./... + race remains the full logic + determinism suite.
-# Target: ~3 minutes on cache hits (ubuntu race is the floor).
-# Required aggregator job: "all checks passed".
+# Measured on run 36262077588 (main, cold caches): ubuntu race+cover 2m30s,
+# cross-compile 2m23s, lint 54s, full CLI smoke 3s, go install 23s because it
+# rebuilt with different flags. Coverage and fuzz run beside race, not inside
+# it. Go build caches are keyed by go.sum so a source-only push restores
+# sqlite/std objects and does not re-upload. Windows/macOS/arm64 stay on
+# -short. Required aggregator job: "all checks passed".
 # Tag pushes are owned by release.yml (skip here to avoid duplicate runners).
 
 on:
@@ -36,11 +37,24 @@ jobs:
     name: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 6
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-go
+      - name: Go build cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ runner.arch }}-lint-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ runner.arch }}-lint-
       - name: gofmt + vet + mod + build + hygiene
         run: |
           set -euo pipefail
@@ -153,12 +167,33 @@ jobs:
           test -f fixtures/fleet_healthy/expected/ask_api.json
           test -f fixtures/fleet_healthy/expected/verify_api.json
           sum "| fixture hygiene | ok |"
-      # PowerShell analysis does not need a Windows runner. Keep it off the
-      # Windows test job so gallery install cannot pad the critical path.
+
+  # Gallery install overlaps lint. It used to add ~16s after the Go hygiene step.
+  installers:
+    name: PSScriptAnalyzer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: PSScriptAnalyzer module cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
+          path: ~/.local/share/powershell/Modules/PSScriptAnalyzer
+          key: psscriptanalyzer-linux-v1
       - name: PSScriptAnalyzer (installers)
         shell: pwsh
         run: |
-          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          }
           $errs = @()
           foreach ($f in @('scripts/install.ps1', 'scripts/verify.ps1')) {
             $findings = Invoke-ScriptAnalyzer -Path $f -Severity @('Error', 'Warning') -ExcludeRule @(
@@ -173,16 +208,30 @@ jobs:
             }
           }
           if ($errs.Count -gt 0) { throw "PSScriptAnalyzer reported $($errs.Count) finding(s)" }
+          "PSScriptAnalyzer ok" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 
   staticcheck:
     name: staticcheck
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-go
+      - name: Go build cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ runner.arch }}-staticcheck-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ runner.arch }}-staticcheck-
       - name: Run staticcheck + deadcode (go tool, sum-pinned)
         run: |
           set -euo pipefail
@@ -201,6 +250,9 @@ jobs:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -220,6 +272,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-go
+      - name: Go build cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
+          path: ${{ runner.os == 'Windows' && '~\AppData\Local\go-build' || runner.os == 'macOS' && '~/Library/Caches/go-build' || '~/.cache/go-build' }}
+          key: gocache-${{ runner.os }}-${{ runner.arch }}-test-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ runner.arch }}-test-
       - name: Build binary
         shell: bash
         run: |
@@ -247,48 +309,23 @@ jobs:
         # Ubuntu ./... + race is the full logic suite. Other OSes only compile
         # packages that touch paths, SQLite, zip, or the CLI.
         run: go test -count=1 -timeout=4m -short -shuffle=on -fullpath ./cmd/opsgraph ./internal/store ./internal/ingest ./internal/config
-      - name: Unit tests (race + shuffle + cover)
+      - name: Unit tests (race + shuffle)
         if: ${{ matrix.race && matrix.os == 'ubuntu-24.04' }}
         env:
           CGO_ENABLED: "1"
         run: |
           set -euo pipefail
-          # Prove the module cache alone is enough (offline-first) for the full test graph.
+          start=$SECONDS
+          # Coverage is a sibling job. -covermode=atomic on top of -race was
+          # the 2m30s step (run 36262077588); race alone still executes ./...
           GOPROXY=off GOFLAGS="-mod=readonly" \
-            go test -count=1 -timeout=10m -race -shuffle=on -fullpath -coverprofile=cover.out -covermode=atomic ./...
-          go tool cover -func=cover.out | tee cover-func.txt | go run ./scripts/coverfloor.go \
-              total=64 \
-              cmd/opsgraph=56 \
-              internal/ai=45 \
-              internal/ask=75 \
-              internal/store=60
-          tail -n 1 cover-func.txt | tee cover-summary.txt
-          # Short deterministic fuzz budgets (no corpus commit required).
-          go test -count=1 -timeout=2m -fuzz=FuzzOfStablePrefix -fuzztime=5s ./internal/fingerprint
-          go test -count=1 -timeout=2m -fuzz=FuzzParse -fuzztime=5s ./internal/runbook
-          go test -count=1 -timeout=2m -fuzz=FuzzServicesYAML -fuzztime=5s ./internal/ingest
+            go test -count=1 -timeout=8m -race -shuffle=on -fullpath ./...
           {
-            echo "## coverage"
+            echo "## race"
             echo ""
-            echo '```'
-            cat cover-summary.txt
-            echo '```'
-            echo ""
-            echo "Floors: total>=64, cmd/opsgraph>=56, internal/ai>=45, internal/ask>=75, internal/store>=60"
-            echo "Fuzz: fingerprint + runbook Parse + services YAML (5s each)"
-            echo "Note: internal/deps is test-only (no statements); pure-Go/mod hygiene covered by deps tests + lint."
+            echo "ubuntu race ./... finished in $((SECONDS - start))s"
+            echo "Coverage floors and 5s fuzz budgets run in the cover job."
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload coverprofile
-        if: ${{ matrix.race && matrix.os == 'ubuntu-24.04' && always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: coverprofile-${{ github.run_id }}
-          path: |
-            cover.out
-            cover-summary.txt
-            cover-func.txt
-          if-no-files-found: ignore
-          retention-days: 7
       - name: Fixture / golden + demo
         shell: bash
         run: |
@@ -647,7 +684,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go install ./cmd/opsgraph
+          go install -trimpath -ldflags="-s -w -buildid=" ./cmd/opsgraph
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           opsgraph version >/dev/null
           opsgraph ask checkout --fixture ./fixtures/incident_checkout --format json >/dev/null
@@ -725,15 +762,90 @@ jobs:
           ./scripts/install.ps1
           & "$installRel/opsgraph.exe" version
 
-  cross:
-    name: cross + release-pack
+  cover:
+    name: cover + fuzz
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-go
+      - name: Go build cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ runner.arch }}-cover-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ runner.arch }}-cover-
+      - name: Coverage floors + short fuzz
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          GOPROXY=off GOFLAGS="-mod=readonly" \
+            go test -count=1 -timeout=6m -coverprofile=cover.out -covermode=atomic ./...
+          go tool cover -func=cover.out | tee cover-func.txt | go run ./scripts/coverfloor.go \
+              total=64 \
+              cmd/opsgraph=56 \
+              internal/ai=45 \
+              internal/ask=75 \
+              internal/store=60
+          tail -n 1 cover-func.txt | tee cover-summary.txt
+          go test -count=1 -timeout=2m -fuzz=FuzzOfStablePrefix -fuzztime=5s ./internal/fingerprint
+          go test -count=1 -timeout=2m -fuzz=FuzzParse -fuzztime=5s ./internal/runbook
+          go test -count=1 -timeout=2m -fuzz=FuzzServicesYAML -fuzztime=5s ./internal/ingest
+          {
+            echo "## coverage"
+            echo ""
+            echo '```'
+            cat cover-summary.txt
+            echo '```'
+            echo ""
+            echo "Floors: total>=64, cmd/opsgraph>=56, internal/ai>=45, internal/ask>=75, internal/store>=60"
+            echo "Fuzz: fingerprint + runbook Parse + services YAML (5s each)"
+            echo "cover job finished in $((SECONDS - start))s (parallel with race)"
+            echo "Note: internal/deps is test-only (no statements); pure-Go/mod hygiene covered by deps tests + lint."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverprofile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverprofile-${{ github.run_id }}
+          path: |
+            cover.out
+            cover-summary.txt
+            cover-func.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  cross:
+    name: cross + release-pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go
+      - name: Go build cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
+          path: ~/.cache/go-build
+          key: gocache-${{ runner.os }}-${{ runner.arch }}-cross-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            gocache-${{ runner.os }}-${{ runner.arch }}-cross-
       - name: Cross-compile 6 targets (parallel) + pack
         env:
           # Stripped linux binaries today ~14MB; fail if a dep bloats past 22MB.
@@ -907,7 +1019,7 @@ jobs:
 
   ci-ok:
     name: all checks passed
-    needs: [lint, staticcheck, test, cross, vuln, arm64-smoke, repro, gitleaks, zizmor, actionlint, dependency-review]
+    needs: [lint, installers, staticcheck, test, cover, cross, vuln, arm64-smoke, repro, gitleaks, zizmor, actionlint, dependency-review]
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     if: always()
@@ -921,8 +1033,10 @@ jobs:
             echo "| job | result |"
             echo "| --- | --- |"
             echo "| lint | ${{ needs.lint.result }} |"
+            echo "| PSScriptAnalyzer | ${{ needs.installers.result }} |"
             echo "| staticcheck | ${{ needs.staticcheck.result }} |"
             echo "| test (3-OS matrix) | ${{ needs.test.result }} |"
+            echo "| cover + fuzz | ${{ needs.cover.result }} |"
             echo "| cross + release-pack | ${{ needs.cross.result }} |"
             echo "| govulncheck | ${{ needs.vuln.result }} |"
             echo "| linux/arm64 smoke | ${{ needs.arm64-smoke.result }} |"
@@ -935,8 +1049,10 @@ jobs:
             echo "CodeQL runs on PRs/schedule via \`codeql.yml\` (advisory; not in this aggregator to keep push wall-clock lean)."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "lint=${{ needs.lint.result }}"
+          echo "installers=${{ needs.installers.result }}"
           echo "staticcheck=${{ needs.staticcheck.result }}"
           echo "test=${{ needs.test.result }}"
+          echo "cover=${{ needs.cover.result }}"
           echo "cross=${{ needs.cross.result }}"
           echo "vuln=${{ needs.vuln.result }}"
           echo "arm64-smoke=${{ needs.arm64-smoke.result }}"
@@ -946,8 +1062,10 @@ jobs:
           echo "actionlint=${{ needs.actionlint.result }}"
           echo "dependency-review=${{ needs.dependency-review.result }}"
           test "${{ needs.lint.result }}" = "success"
+          test "${{ needs.installers.result }}" = "success"
           test "${{ needs.staticcheck.result }}" = "success"
           test "${{ needs.test.result }}" = "success"
+          test "${{ needs.cover.result }}" = "success"
           test "${{ needs.cross.result }}" = "success"
           test "${{ needs.vuln.result }}" = "success"
           test "${{ needs.arm64-smoke.result }}" = "success"
