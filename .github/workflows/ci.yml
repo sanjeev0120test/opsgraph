@@ -397,6 +397,16 @@ jobs:
           grep -F "SERVICE   checkout (degraded; rollout deadline exceeded" "$stuck/out.txt"
           grep -F "Investigate checkout health (degraded; rollout deadline exceeded" "$stuck/out.txt"
           grep -F "CHANGES   none in window" "$stuck/out.txt"
+          cap="$(mktemp -d)"
+          cp fixtures/unavailable_capacity/k8s-snapshot.yaml "$cap/k8s-snapshot.yaml"
+          (cd "$cap" && "$absbin" ask checkout > "$cap/out.txt")
+          grep -F "SERVICE   checkout (degraded; not available)" "$cap/out.txt"
+          grep -F "Investigate checkout health (degraded; not available)" "$cap/out.txt"
+          stale="$(mktemp -d)"
+          cp fixtures/stale_generation/k8s-snapshot.yaml "$stale/k8s-snapshot.yaml"
+          (cd "$stale" && "$absbin" ask checkout > "$stale/out.txt")
+          grep -F "SERVICE   checkout (unknown; status stale: observed generation 3, spec generation 4)" "$stale/out.txt"
+          grep -F "Treat checkout health as unknown (status stale: observed generation 3, spec generation 4)" "$stale/out.txt"
       - name: Full CLI smoke (ubuntu)
         if: ${{ matrix.smoke == 'full' }}
         shell: bash
@@ -497,6 +507,30 @@ jobs:
             grep -F "SERVICE" "$stuck/out.txt"
             grep -F "CHANGES" "$stuck/out.txt"
             grep -F "Investigate checkout health" "$stuck/out.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cap="$(mktemp -d)"
+          cp fixtures/unavailable_capacity/k8s-snapshot.yaml "$cap/k8s-snapshot.yaml"
+          (cd "$cap" && "$absbin" ask checkout > "$cap/out.txt")
+          grep -F "SERVICE   checkout (degraded; not available)" "$cap/out.txt"
+          grep -F "Investigate checkout health (degraded; not available)" "$cap/out.txt"
+          grep -F "CHANGES   none in window" "$cap/out.txt"
+          stale="$(mktemp -d)"
+          cp fixtures/stale_generation/k8s-snapshot.yaml "$stale/k8s-snapshot.yaml"
+          (cd "$stale" && "$absbin" ask checkout > "$stale/out.txt")
+          grep -F "SERVICE   checkout (unknown; status stale: observed generation 3, spec generation 4)" "$stale/out.txt"
+          grep -F "Treat checkout health as unknown (status stale: observed generation 3, spec generation 4)" "$stale/out.txt"
+          grep -F "CHANGES   none in window" "$stale/out.txt"
+          {
+            echo "## capacity and stale status"
+            echo ""
+            echo "3/3 ready with availableReplicas 0 and no Available condition is **degraded**. A newer spec generation than status.observedGeneration is **unknown**."
+            echo ""
+            echo '```'
+            grep -F "SERVICE" "$cap/out.txt"
+            grep -F "Investigate checkout health" "$cap/out.txt"
+            grep -F "SERVICE" "$stale/out.txt"
+            grep -F "Treat checkout health" "$stale/out.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           "$BIN" health --fixture ./fixtures/fleet_healthy --format json | "${JA[@]}" true:ok eqnum:total=2

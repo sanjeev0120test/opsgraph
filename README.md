@@ -86,8 +86,11 @@ not remediate, and a same-named workload in two namespaces still shares one
 service id (changing that would change the prove hash).
 
 A Deployment that is 3/3 ready after `ProgressDeadlineExceeded` is reported
-`degraded`, and the next step names that deadline. `readyReplicas: 0` stays
-`unhealthy`. Scaled to zero stays `unknown`.
+`degraded`, and the next step names that deadline. The same is true when
+every replica is ready but `availableReplicas` is lower and there is no
+`Available` condition. If the spec generation is newer than
+`status.observedGeneration`, health is `unknown` rather than healthy.
+`readyReplicas: 0` stays `unhealthy`. Scaled to zero stays `unknown`.
 
 Optional local summaries use [langchaingo](https://github.com/tmc/langchaingo)
 against Ollama on localhost. They are off unless you pass `--ai`, and `test`
@@ -155,6 +158,8 @@ kubectl get deploy,statefulset,daemonset,job,event -o yaml > k8s-snapshot.yaml
 kube-system agents). StatefulSets, DaemonSets, and Jobs are first-class:
 `postgres` at 0/3 ready is `unhealthy`; a failed Job is `unhealthy`; a
 Deployment that is 3/3 ready but `ProgressDeadlineExceeded` is `degraded`;
+3/3 ready with `availableReplicas` below that, and no `Available` condition,
+is `degraded`; a newer spec than `status.observedGeneration` is `unknown`;
 `ask billing-settle` works from Job events.
 
 ## Installation

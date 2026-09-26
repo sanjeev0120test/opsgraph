@@ -58,8 +58,11 @@ func recommend(res model.AskResult) []string {
 		recs = append(recs, fmt.Sprintf("Correlate change→alert: %s.", c.Summary))
 	}
 
-	// R1b: queried service itself is unhealthy/degraded.
-	if res.Service.Health == model.HealthDegraded || res.Service.Health == model.HealthUnhealthy {
+	// R1b: queried service itself is unhealthy/degraded, or unknown because
+	// status does not describe the current spec. A healthy service with a
+	// leftover label is not investigated.
+	if res.Service.Health == model.HealthDegraded || res.Service.Health == model.HealthUnhealthy ||
+		(res.Service.Health == model.HealthUnknown && model.RolloutNote(res.Service) != "") {
 		recs = append(recs, healthRecommendation(res))
 	}
 
@@ -111,7 +114,12 @@ func recommend(res model.AskResult) []string {
 func healthRecommendation(res model.AskResult) string {
 	svc := res.Service
 	if note := model.RolloutNote(svc); note != "" {
-		msg := fmt.Sprintf("Investigate %s health (%s; %s) and stabilize before further changes.", svc.ID, svc.Health, note)
+		var msg string
+		if svc.Health == model.HealthUnknown {
+			msg = fmt.Sprintf("Treat %s health as unknown (%s); replica counts do not describe the current spec.", svc.ID, note)
+		} else {
+			msg = fmt.Sprintf("Investigate %s health (%s; %s) and stabilize before further changes.", svc.ID, svc.Health, note)
+		}
 		if id := RolloutEvidenceID(res); id != "" {
 			msg += " Evidence: " + id + "."
 		}
@@ -121,13 +129,30 @@ func healthRecommendation(res model.AskResult) string {
 }
 
 // RolloutEvidenceID is the evidence row whose summary contains the rollout note.
-// Empty when the note is missing or no row quotes it.
+// Empty when the note is missing or no row quotes it. A joined note (two
+// workloads, separated by "; ") matches the first row that quotes any segment.
 func RolloutEvidenceID(res model.AskResult) string {
 	note := model.RolloutNote(res.Service)
 	if note == "" {
 		return ""
 	}
-	for _, e := range res.Evidence {
+	if id := evidenceContaining(res.Evidence, note); id != "" {
+		return id
+	}
+	for _, part := range strings.Split(note, "; ") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if id := evidenceContaining(res.Evidence, part); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func evidenceContaining(evs []model.Evidence, note string) string {
+	for _, e := range evs {
 		summary := strings.Join(strings.Fields(e.Summary), " ")
 		if strings.Contains(summary, note) {
 			return e.ID

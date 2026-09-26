@@ -223,6 +223,60 @@ func TestRecommendDegradedWithoutNoteStaysStable(t *testing.T) {
 	}
 }
 
+func TestRolloutEvidenceIDMatchesNoteSegment(t *testing.T) {
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthDegraded,
+			Labels: map[string]string{"opsgraph_rollout": "rollout deadline exceeded; replica failure"},
+		},
+		Evidence: []model.Evidence{
+			{ID: "ev-other", Summary: "unrelated"},
+			{ID: "ev-deadline", Summary: "rollout checkout-api (3/3 ready); rollout deadline exceeded"},
+		},
+	}
+	if got := RolloutEvidenceID(res); got != "ev-deadline" {
+		t.Fatalf("segment match = %q", got)
+	}
+}
+
+func TestRecommendNamesStaleGeneration(t *testing.T) {
+	note := "status stale: observed generation 3, spec generation 4"
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthUnknown,
+			Labels: map[string]string{"opsgraph_rollout": note},
+		},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+		Evidence: []model.Evidence{{
+			ID:      "ev-k8s-rollout-shop-checkout-api",
+			Summary: "rollout checkout-api (3/3 ready); " + note,
+		}},
+	}
+	var found string
+	for _, r := range recommend(res) {
+		if strings.Contains(r, "Treat checkout health as unknown") {
+			found = r
+		}
+	}
+	if found == "" || !strings.Contains(found, note) || !strings.Contains(found, "Evidence: ev-k8s-rollout-shop-checkout-api.") {
+		t.Fatalf("stale next step = %q\nall=%v", found, recommend(res))
+	}
+}
+
+func TestRecommendUnknownWithoutNoteStaysQuiet(t *testing.T) {
+	res := model.AskResult{
+		Service:     model.Service{ID: "checkout", Health: model.HealthUnknown},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+	}
+	for _, r := range recommend(res) {
+		if strings.Contains(r, "Investigate") || strings.Contains(r, "Treat") {
+			t.Fatalf("unknown without a note must not invent a health step: %v", recommend(res))
+		}
+	}
+}
+
 func TestRecommendEmptyStillHasR6(t *testing.T) {
 	recs := recommend(model.AskResult{Service: model.Service{ID: "x"}, GeneratedAt: time.Now().UTC()})
 	if len(recs) != 2 {

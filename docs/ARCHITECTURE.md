@@ -50,11 +50,17 @@ Operators dump YAML themselves. The parser accepts:
    A missing `service_id` falls back to `name` so simplified dumps still ingest.
 
 Replica health is `ready` vs `desired`. When those counts are full, a
-`ProgressDeadlineExceeded`, `ReplicaFailure`, or `Available=False` condition
-still marks the service `degraded` and records the reason on the rollout
-evidence line (`opsgraph_rollout` label). A Job that is still retrying
-(`failed > 0`, `active > 0`) is `degraded`; a terminal Job failure is
-`unhealthy`. `replicas: 0` stays `unknown`.
+`Progressing=False` / `ProgressDeadlineExceeded`, `ReplicaFailure`, or
+`Available=False` condition still marks the service `degraded` and records
+the reason on the rollout evidence line (`opsgraph_rollout` label). A full
+ready count with `availableReplicas` (or DaemonSet `numberAvailable`) below
+desired, and no `Available` condition, is the same `degraded` result. An
+explicit `Available=True` is not overridden. `metadata.generation` ahead of
+`status.observedGeneration` is `unknown`, not healthy. A Job that is still
+retrying (`failed > 0`, `active > 0`) is `degraded`; a terminal Job failure
+is `unhealthy`. `replicas: 0` stays `unknown`. A ReplicaSet is ingested only
+when its Deployment is not in the same dump; child ReplicaSets are not
+rolled up beside a parent that is already present.
 
 A single List file can supply both Deployments and Events; a sibling `events.yaml`
 is merged when present.

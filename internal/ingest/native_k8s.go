@@ -41,7 +41,14 @@ type nativeObjectMeta struct {
 	Name              string            `yaml:"name"`
 	Namespace         string            `yaml:"namespace"`
 	Labels            map[string]string `yaml:"labels"`
+	Generation        *int64            `yaml:"generation"`
+	OwnerReferences   []nativeOwnerRef  `yaml:"ownerReferences"`
 	CreationTimestamp any               `yaml:"creationTimestamp"`
+}
+
+type nativeOwnerRef struct {
+	Kind string `yaml:"kind"`
+	Name string `yaml:"name"`
 }
 
 type nativeDepSpec struct {
@@ -53,12 +60,19 @@ type nativeDepStatus struct {
 	Replicas      int `yaml:"replicas"`
 	ReadyReplicas int `yaml:"readyReplicas"`
 	// DaemonSets have no spec.replicas; readiness is counted per scheduled node.
-	DesiredNumberScheduled int               `yaml:"desiredNumberScheduled"`
-	NumberReady            int               `yaml:"numberReady"`
-	Succeeded              int               `yaml:"succeeded"`
-	Failed                 int               `yaml:"failed"`
-	Active                 int               `yaml:"active"`
-	Conditions             []nativeCondition `yaml:"conditions"`
+	DesiredNumberScheduled int `yaml:"desiredNumberScheduled"`
+	NumberReady            int `yaml:"numberReady"`
+	// Pointers so an omitted field is not treated as zero. availableReplicas: 0
+	// is a real "none available" signal; a missing key is not.
+	AvailableReplicas   *int              `yaml:"availableReplicas"`
+	UnavailableReplicas *int              `yaml:"unavailableReplicas"`
+	NumberAvailable     *int              `yaml:"numberAvailable"`
+	NumberUnavailable   *int              `yaml:"numberUnavailable"`
+	ObservedGeneration  *int64            `yaml:"observedGeneration"`
+	Succeeded           int               `yaml:"succeeded"`
+	Failed              int               `yaml:"failed"`
+	Active              int               `yaml:"active"`
+	Conditions          []nativeCondition `yaml:"conditions"`
 }
 
 type nativeCondition struct {
@@ -228,9 +242,7 @@ func fillMissingDeploymentServiceIDs(deps *k8sDeployments) {
 	}
 	fill(deps.Deployments)
 	fill(deps.leftoverRS)
-	if len(deps.Deployments) == 0 && len(deps.leftoverRS) > 0 {
-		deps.Deployments = deps.leftoverRS
-	}
+	deps.Deployments = append(deps.Deployments, orphanReplicaSets(deps.Deployments, deps.leftoverRS)...)
 }
 
 // looksNativeK8s reports kubectl/API YAML (kind List/Deployment/Event). The
@@ -310,7 +322,7 @@ func nativeToWorkload(o nativeObject) (k8sDeployment, bool) {
 		return k8sDeployment{}, false
 	}
 	kind := normalizeKind(o.Kind)
-	desired, ready, forceDegraded, note := assessWorkload(o)
+	desired, ready, forceDegraded, forceUnknown, note := assessWorkload(o)
 	ns := strings.TrimSpace(o.Metadata.Namespace)
 	if ns == "" {
 		ns = "default"
@@ -324,28 +336,55 @@ func nativeToWorkload(o nativeObject) (k8sDeployment, bool) {
 		Ready:         ready,
 		UpdatedAt:     deploymentUpdatedAt(o),
 		forceDegraded: forceDegraded,
+		forceUnknown:  forceUnknown,
 		rolloutNote:   note,
+		owners:        nativeOwners(o),
 	}, true
 }
 
 // assessWorkload reads replica counters and conditions. A Deployment can keep
 // readyReplicas == spec.replicas on the old revision after ProgressDeadlineExceeded.
 // Treating that as healthy hides the failed rollout from ask and health --strict.
-func assessWorkload(o nativeObject) (desired, ready int, forceDegraded bool, note string) {
+// A full ready count is also a false all-clear when available capacity is short
+// and no Available condition contradicts the count, or when status.observedGeneration
+// is behind metadata.generation (those replicas describe an older spec).
+func assessWorkload(o nativeObject) (desired, ready int, forceDegraded, forceUnknown bool, note string) {
 	kind := normalizeKind(o.Kind)
 	desired, ready = workloadReplicas(o, kind)
+	if stale, n := statusStaleNote(o); stale {
+		return desired, ready, false, true, n
+	}
 	switch kind {
 	case "job":
 		if jobStillRetrying(o, desired) {
 			// Downgrade only a false all-clear. Partial success is already degraded.
-			return desired, ready, deploymentHealth(desired, ready) == "healthy", "retrying after pod failure"
+			return desired, ready, deploymentHealth(desired, ready) == "healthy", false, "retrying after pod failure"
 		}
 	case "deployment", "statefulset", "daemonset", "replicaset":
 		if ok, n := rolloutDegradedNote(o); ok {
-			return desired, ready, deploymentHealth(desired, ready) == "healthy", n
+			return desired, ready, deploymentHealth(desired, ready) == "healthy", false, n
+		}
+		if desired > 0 && ready >= desired && capacityShort(o, desired) {
+			return desired, ready, true, false, "not available"
 		}
 	}
-	return desired, ready, false, ""
+	return desired, ready, false, false, ""
+}
+
+func nativeOwners(o nativeObject) []k8sOwner {
+	if len(o.Metadata.OwnerReferences) == 0 {
+		return nil
+	}
+	out := make([]k8sOwner, 0, len(o.Metadata.OwnerReferences))
+	for _, r := range o.Metadata.OwnerReferences {
+		name := strings.TrimSpace(r.Name)
+		kind := strings.TrimSpace(r.Kind)
+		if name == "" || kind == "" {
+			continue
+		}
+		out = append(out, k8sOwner{Kind: kind, Name: name})
+	}
+	return out
 }
 
 // workloadReplicas reads per-kind replica counters. DaemonSets have no
@@ -541,6 +580,111 @@ func rolloutDegradedNote(o nativeObject) (bool, string) {
 		note += ": " + detail
 	}
 	return true, note
+}
+
+// statusStaleNote reports that status.observedGeneration is behind
+// metadata.generation. Missing either field is not stale: partial dumps must
+// not become unknown just because a controller stamp was omitted.
+func statusStaleNote(o nativeObject) (bool, string) {
+	switch normalizeKind(o.Kind) {
+	case "deployment", "statefulset", "daemonset", "replicaset", "job":
+	default:
+		return false, ""
+	}
+	if o.Metadata.Generation == nil || o.Status.ObservedGeneration == nil {
+		return false, ""
+	}
+	spec := *o.Metadata.Generation
+	obs := *o.Status.ObservedGeneration
+	if spec <= 0 || obs >= spec {
+		return false, ""
+	}
+	return true, fmt.Sprintf("status stale: observed generation %d, spec generation %d", obs, spec)
+}
+
+// capacityShort reports a full ready count whose available capacity is lower,
+// when no Available condition already says true or false. An explicit
+// Available=True is Kubernetes's own decision (maxUnavailable during a
+// rollout) and must not be overridden by the numeric field.
+func capacityShort(o nativeObject, desired int) bool {
+	if desired <= 0 || availableConditionKnown(o) {
+		return false
+	}
+	kind := normalizeKind(o.Kind)
+	if kind == "daemonset" {
+		if o.Status.NumberAvailable != nil && *o.Status.NumberAvailable < desired {
+			return true
+		}
+		return o.Status.NumberUnavailable != nil && *o.Status.NumberUnavailable > 0
+	}
+	if o.Status.AvailableReplicas != nil && *o.Status.AvailableReplicas < desired {
+		return true
+	}
+	return o.Status.UnavailableReplicas != nil && *o.Status.UnavailableReplicas > 0
+}
+
+func availableConditionKnown(o nativeObject) bool {
+	for _, c := range o.Status.Conditions {
+		if strings.ToLower(strings.TrimSpace(c.Type)) != "available" {
+			continue
+		}
+		switch condStatus(c.Status) {
+		case "true", "false":
+			return true
+		}
+	}
+	return false
+}
+
+// orphanReplicaSets keeps ReplicaSets whose controller is not already in the
+// dump. A child ReplicaSet of a Deployment in the same file must not be
+// rolled up beside its parent (the old revision is often 0 ready). A
+// ReplicaSet with no parent in the dump is the only health signal for that
+// name, so it becomes a workload.
+func orphanReplicaSets(workloads, sets []k8sDeployment) []k8sDeployment {
+	if len(sets) == 0 {
+		return nil
+	}
+	var out []k8sDeployment
+	for _, rs := range sets {
+		if replicaSetCovered(rs, workloads) {
+			continue
+		}
+		out = append(out, rs)
+	}
+	return out
+}
+
+func replicaSetCovered(rs k8sDeployment, workloads []k8sDeployment) bool {
+	for _, o := range rs.owners {
+		okind := normalizeKind(o.Kind)
+		if okind != "deployment" && okind != "statefulset" && okind != "daemonset" {
+			continue
+		}
+		for _, w := range workloads {
+			if strings.EqualFold(w.Namespace, rs.Namespace) && strings.EqualFold(w.Name, o.Name) && normalizeKind(w.Kind) == okind {
+				return true
+			}
+		}
+	}
+	for _, w := range workloads {
+		if !strings.EqualFold(w.Namespace, rs.Namespace) {
+			continue
+		}
+		switch normalizeKind(w.Kind) {
+		case "deployment", "statefulset", "daemonset":
+		default:
+			continue
+		}
+		rest, ok := strings.CutPrefix(rs.Name, w.Name+"-")
+		if !ok || rest == "" {
+			continue
+		}
+		if isK8sControllerHash(rest) {
+			return true
+		}
+	}
+	return false
 }
 
 func clipConditionMessage(s string) string {

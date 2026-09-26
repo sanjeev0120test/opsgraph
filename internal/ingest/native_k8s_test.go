@@ -1425,6 +1425,365 @@ func captureStderr(t *testing.T, fn func() error) string {
 	return out
 }
 
+func TestFullReadyIsNotHealthyWhenCapacityOrStatusDisagree(t *testing.T) {
+	cases := []struct {
+		name          string
+		body          string
+		health        string
+		note          string
+		forceDegraded bool
+		forceUnknown  bool
+	}{
+		{
+			name: "available replicas below ready",
+			body: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  labels:
+    app: checkout
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  availableReplicas: 0
+`,
+			health: "degraded", note: "not available", forceDegraded: true,
+		},
+		{
+			name: "unavailable replicas with no available condition",
+			body: `
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  unavailableReplicas: 1
+`,
+			health: "degraded", note: "not available", forceDegraded: true,
+		},
+		{
+			name: "available true is not overridden",
+			body: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  availableReplicas: 2
+  conditions:
+  - type: Available
+    status: "True"
+`,
+			health: "healthy",
+		},
+		{
+			name: "omitted available replicas stays healthy",
+			body: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+`,
+			health: "healthy",
+		},
+		{
+			name: "daemonset number available short",
+			body: `
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluent-bit
+spec: {}
+status:
+  desiredNumberScheduled: 3
+  numberReady: 3
+  numberAvailable: 1
+`,
+			health: "degraded", note: "not available", forceDegraded: true,
+		},
+		{
+			name: "daemonset omits number available",
+			body: `
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluent-bit
+spec: {}
+status:
+  desiredNumberScheduled: 3
+  numberReady: 3
+`,
+			health: "healthy",
+		},
+		{
+			name: "generation ahead of observed",
+			body: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  generation: 4
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  observedGeneration: 3
+  availableReplicas: 0
+`,
+			health: "unknown", note: "status stale: observed generation 3, spec generation 4", forceUnknown: true,
+		},
+		{
+			name: "matching generation stays healthy",
+			body: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  generation: 4
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  observedGeneration: 4
+`,
+			health: "healthy",
+		},
+		{
+			name: "missing observed generation is not stale",
+			body: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  generation: 4
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+`,
+			health: "healthy",
+		},
+		{
+			name: "cronjob generation skew stays spec-unknown",
+			body: `
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: billing
+  generation: 4
+spec: {}
+status:
+  observedGeneration: 1
+`,
+			health: "unknown",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, _, err := parseNativeK8s([]byte(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(deps.Deployments) != 1 && len(deps.leftoverRS) != 1 {
+				t.Fatalf("objects: deps=%d rs=%d", len(deps.Deployments), len(deps.leftoverRS))
+			}
+			d := deps.Deployments[0]
+			if len(deps.Deployments) == 0 {
+				d = deps.leftoverRS[0]
+			}
+			if d.health() != tc.health || d.forceDegraded != tc.forceDegraded || d.forceUnknown != tc.forceUnknown {
+				t.Fatalf("health=%s degraded=%v unknown=%v note=%q", d.health(), d.forceDegraded, d.forceUnknown, d.rolloutNote)
+			}
+			if tc.note != "" && d.rolloutNote != tc.note {
+				t.Fatalf("note=%q", d.rolloutNote)
+			}
+			if tc.note == "" && d.rolloutNote != "" {
+				t.Fatalf("unexpected note %q", d.rolloutNote)
+			}
+		})
+	}
+}
+
+func TestOrphanReplicaSetIsKeptAndChildIsNot(t *testing.T) {
+	data := []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: shop
+  labels:
+    app: checkout
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: checkout-api-7d9f8c4b5d
+  namespace: shop
+  labels:
+    app: checkout
+  ownerReferences:
+  - kind: Deployment
+    name: checkout-api
+spec:
+  replicas: 2
+status:
+  readyReplicas: 0
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: payments-7d9f8c4b5d
+  namespace: shop
+  labels:
+    app: payments
+spec:
+  replicas: 2
+status:
+  readyReplicas: 0
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fillMissingDeploymentServiceIDs(&deps)
+	got := map[string]string{}
+	for _, d := range deps.Deployments {
+		got[d.ServiceID] = d.health()
+	}
+	if got["checkout"] != "healthy" || got["payments"] != "unhealthy" {
+		t.Fatalf("services: %+v", got)
+	}
+	if len(deps.Deployments) != 2 {
+		t.Fatalf("child replicaset was rolled up: %+v", deps.Deployments)
+	}
+}
+
+func TestStaleStatusBeatsHealthySibling(t *testing.T) {
+	root := t.TempDir()
+	body := []byte(`
+apiVersion: v1
+kind: List
+items:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout-api
+    namespace: shop
+    labels:
+      app: checkout
+  spec:
+    replicas: 3
+  status:
+    readyReplicas: 3
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout-worker
+    namespace: shop
+    generation: 5
+    labels:
+      app: checkout
+  spec:
+    replicas: 1
+  status:
+    readyReplicas: 1
+    observedGeneration: 4
+`)
+	if err := os.WriteFile(filepath.Join(root, "deployments.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := store.OpenTemp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	stderr := captureStderr(t, func() error {
+		return ingestK8sFiles(s, os.DirFS(root), "deployments.yaml", "events.yaml",
+			time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC), k8sAllow{})
+	})
+	if !strings.Contains(stderr, "status stale: observed generation 4, spec generation 5") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "kubectl describe deploy/checkout-worker -n shop") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	svc, err := s.GetService("checkout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.Health != "unknown" || !strings.Contains(svc.Labels["opsgraph_rollout"], "status stale:") {
+		t.Fatalf("rollup hid the stale worker: %+v", svc)
+	}
+}
+
+func TestUnhealthySiblingOutranksStaleStatus(t *testing.T) {
+	data := []byte(`
+apiVersion: v1
+kind: List
+items:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout-api
+    namespace: shop
+    labels:
+      app: checkout
+  spec:
+    replicas: 3
+  status:
+    readyReplicas: 0
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout-worker
+    namespace: shop
+    generation: 5
+    labels:
+      app: checkout
+  spec:
+    replicas: 1
+  status:
+    readyReplicas: 1
+    observedGeneration: 4
+`)
+	deps, _, _, err := parseNativeK8s(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fillMissingDeploymentServiceIDs(&deps)
+	if len(deps.Deployments) != 2 {
+		t.Fatalf("deps: %+v", deps.Deployments)
+	}
+	worst := deps.Deployments[0]
+	for _, d := range deps.Deployments[1:] {
+		if betterWorkload(d, worst) {
+			worst = d
+		}
+	}
+	if note := joinRolloutNotes(deps.Deployments, worst.forceUnknown); note != "" {
+		worst.rolloutNote = note
+	}
+	if worst.health() != "unhealthy" || strings.Contains(worst.rolloutNote, "status stale") {
+		t.Fatalf("unhealthy lost to stale status: %+v", worst)
+	}
+}
+
 func FuzzParseNativeK8s(f *testing.F) {
 	f.Add([]byte("kind: List\nitems: []\n"))
 	f.Add([]byte("kind: Deployment\nmetadata:\n  name: x\n"))
