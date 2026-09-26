@@ -142,6 +142,87 @@ func TestRecommendFullOrder(t *testing.T) {
 	}
 }
 
+func TestRecommendNamesRolloutDeadline(t *testing.T) {
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthDegraded,
+			Labels: map[string]string{"opsgraph_rollout": "rollout deadline exceeded: ReplicaSet \"checkout-api-abc\" has timed out progressing."},
+		},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+	}
+	recs := recommend(res)
+	found := false
+	for _, r := range recs {
+		if strings.Contains(r, "Investigate checkout health (degraded; rollout deadline exceeded:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("next step must name the deadline: %v", recs)
+	}
+}
+
+func TestRecommendCitesRolloutEvidence(t *testing.T) {
+	note := "rollout deadline exceeded: ReplicaSet checkout-api-abc has timed out progressing."
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthDegraded,
+			Labels: map[string]string{"opsgraph_rollout": note},
+		},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+		Evidence: []model.Evidence{{
+			ID:      "ev-k8s-rollout-shop-checkout-api",
+			Summary: "rollout checkout-api (3/3 ready); " + note,
+		}},
+	}
+	recs := recommend(res)
+	found := false
+	for _, r := range recs {
+		if strings.Contains(r, "Evidence: ev-k8s-rollout-shop-checkout-api.") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing evidence id: %v", recs)
+	}
+}
+
+func TestRecommendHealthyIgnoresStaleRolloutLabel(t *testing.T) {
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthHealthy,
+			Labels: map[string]string{"opsgraph_rollout": "rollout deadline exceeded"},
+		},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+	}
+	for _, r := range recommend(res) {
+		if strings.Contains(r, "Investigate") {
+			t.Fatalf("healthy service must not be investigated for a stale label: %v", recommend(res))
+		}
+	}
+}
+
+func TestRecommendDegradedWithoutNoteStaysStable(t *testing.T) {
+	res := model.AskResult{
+		Service:     model.Service{ID: "checkout", Health: model.HealthDegraded},
+		GeneratedAt: time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC),
+	}
+	recs := recommend(res)
+	want := "Investigate checkout health (degraded) and stabilize before further changes."
+	found := false
+	for _, r := range recs {
+		if r == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("fixture wording drifted: %v", recs)
+	}
+}
+
 func TestRecommendEmptyStillHasR6(t *testing.T) {
 	recs := recommend(model.AskResult{Service: model.Service{ID: "x"}, GeneratedAt: time.Now().UTC()})
 	if len(recs) != 2 {

@@ -89,7 +89,9 @@ Workload health comes from replica readiness: `spec.replicas` vs
 A full ready count is not treated as healthy when a condition contradicts it:
 `Progressing=False` / `ProgressDeadlineExceeded`, `ReplicaFailure=True`, or
 `Available=False` marks the service `degraded`. The human SERVICE line repeats
-the reason (`opsgraph_rollout`). Stderr names a false all-clear and suggests
+the reason (`opsgraph_rollout`). The next-step sentence and `handoff` repeat
+that reason, including when the rollout is outside `--since` and CHANGES is
+empty, and they cite the rollout evidence ID when one exists. Stderr names a false all-clear and suggests
 `kubectl describe` (it returns immediately; `kubectl rollout status` would
 block). `readyReplicas: 0` stays `unhealthy` and still keeps the reason.
 Scaled to zero (`replicas: 0`) stays `unknown`, including a stale

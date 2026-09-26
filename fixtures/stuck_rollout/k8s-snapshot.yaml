@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: shop
+  labels:
+    app: checkout
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  conditions:
+    - type: Progressing
+      status: "False"
+      reason: ProgressDeadlineExceeded
+      message: ReplicaSet "checkout-api-abc" has timed out progressing.
+      lastUpdateTime: "2026-07-31T11:40:00Z"

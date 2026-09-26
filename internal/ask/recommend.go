@@ -60,7 +60,7 @@ func recommend(res model.AskResult) []string {
 
 	// R1b: queried service itself is unhealthy/degraded.
 	if res.Service.Health == model.HealthDegraded || res.Service.Health == model.HealthUnhealthy {
-		recs = append(recs, fmt.Sprintf("Investigate %s health (%s) and stabilize before further changes.", res.Service.ID, res.Service.Health))
+		recs = append(recs, healthRecommendation(res))
 	}
 
 	// R2: unhealthy upstreams block safe changes (id order from Upstream).
@@ -106,6 +106,34 @@ func recommend(res model.AskResult) []string {
 	// R6: always appended so every answer ends with a stable handoff step.
 	recs = append(recs, r6Handoff)
 	return recs
+}
+
+func healthRecommendation(res model.AskResult) string {
+	svc := res.Service
+	if note := model.RolloutNote(svc); note != "" {
+		msg := fmt.Sprintf("Investigate %s health (%s; %s) and stabilize before further changes.", svc.ID, svc.Health, note)
+		if id := RolloutEvidenceID(res); id != "" {
+			msg += " Evidence: " + id + "."
+		}
+		return msg
+	}
+	return fmt.Sprintf("Investigate %s health (%s) and stabilize before further changes.", svc.ID, svc.Health)
+}
+
+// RolloutEvidenceID is the evidence row whose summary contains the rollout note.
+// Empty when the note is missing or no row quotes it.
+func RolloutEvidenceID(res model.AskResult) string {
+	note := model.RolloutNote(res.Service)
+	if note == "" {
+		return ""
+	}
+	for _, e := range res.Evidence {
+		summary := strings.Join(strings.Fields(e.Summary), " ")
+		if strings.Contains(summary, note) {
+			return e.ID
+		}
+	}
+	return ""
 }
 
 func recentChange(res model.AskResult) (model.Change, bool) {

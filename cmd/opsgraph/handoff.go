@@ -70,7 +70,11 @@ func handoffNote(res model.AskResult) string {
 	fp := fingerprint.Of(res)
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Handoff: %s\n\n", res.Service.ID)
-	fmt.Fprintf(&b, "- Health: **%s**\n", res.Service.Health)
+	if note := model.RolloutNote(res.Service); note != "" {
+		fmt.Fprintf(&b, "- Health: **%s** (%s)\n", res.Service.Health, note)
+	} else {
+		fmt.Fprintf(&b, "- Health: **%s**\n", res.Service.Health)
+	}
 	fmt.Fprintf(&b, "- Severity: **%d** (%s)\n", sc.Score, sc.Level)
 	fmt.Fprintf(&b, "- Fingerprint: `%s`\n", fp.Fingerprint)
 	fmt.Fprintf(&b, "- As of: %s (window last %s)\n", res.GeneratedAt.UTC().Format(time.RFC3339), res.Window)
@@ -96,6 +100,13 @@ func handoffNote(res model.AskResult) string {
 		b.WriteString("- No change inside the 30m suspect window; older lookback changes exist.\n")
 	} else {
 		b.WriteString("- No change inside the 30m suspect window.\n")
+	}
+	if note := model.RolloutNote(res.Service); note != "" {
+		fmt.Fprintf(&b, "- Rollout: %s", note)
+		if id := ask.RolloutEvidenceID(res); id != "" {
+			fmt.Fprintf(&b, " [%s]", id)
+		}
+		b.WriteString("\n")
 	}
 	for _, c := range res.Correlations {
 		fmt.Fprintf(&b, "- Linked: %s", c.Summary)
