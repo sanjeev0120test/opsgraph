@@ -7,6 +7,8 @@ name: ci
 # Do not set actions/cache lookup-only. That input skips the download, so
 # pull requests recompile. A primary-key hit restores and does not upload.
 # Keys are go.sum + OS + arch + job, so a source-only change reuses objects.
+# Stay on actions/cache v4.2.4. v5+ uses a new cache service and would miss
+# the entries saved by run 36264189646.
 # Windows/macOS/arm64 stay on -short. Required aggregator: "all checks passed".
 # Tag pushes are owned by release.yml (skip here to avoid duplicate runners).
 
@@ -71,10 +73,9 @@ jobs:
             exit 1
           fi
           sum "| gofmt | ok |"
-          go vet ./...
-          # All vet analyzers (compile-only; no test execution).
+          # -vet=all includes the default vet analyzers. Compile only.
           go test -count=1 -timeout=3m -vet=all -run=^$ ./...
-          sum "| go vet (+ -vet=all) | ok |"
+          sum "| go test -vet=all | ok |"
           test -s .gitattributes
           grep -Fq '* text=auto eol=lf' .gitattributes
           sum "| .gitattributes LF pin | ok |"
@@ -188,12 +189,12 @@ jobs:
         with:
           # Restore on push and pull_request. lookup-only skips the download.
           path: ~/.local/share/powershell/Modules/PSScriptAnalyzer
-          key: psscriptanalyzer-linux-v1
+          key: psscriptanalyzer-1.25.0
       - name: PSScriptAnalyzer (installers)
         shell: pwsh
         run: |
-          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
-            Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer -RequiredVersion 1.25.0)) {
+            Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
           }
           $errs = @()
           foreach ($f in @('scripts/install.ps1', 'scripts/verify.ps1')) {
@@ -410,7 +411,8 @@ jobs:
         run: |
           set -euo pipefail
           BIN=./bin/opsgraph
-          # Critical contracts only - broad command coverage lives in Go tests (features_test).
+          # Release-binary contract (jsonassert, health step summary, offline proxy).
+          # Go tests cover the same commands with substring checks. This step is ~2s.
           out="$("$BIN" version 2>/tmp/version.err)"
           if [ -s /tmp/version.err ]; then
             echo "version wrote to stderr:" >&2

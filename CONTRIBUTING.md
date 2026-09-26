@@ -33,7 +33,7 @@ go run ./cmd/opsgraph test ./fixtures/incident_checkout --update
 - Fixture goldens are LF-only + structurally complete (`.gitattributes`, `scripts/check_lf.go`, `scripts/check_fixtures.go`)
 - After `go mod tidy`, builds use a locked module graph (`-mod=readonly -buildvcs=false`)
 - Release ldflags keep an empty Go build ID (`-buildid=`)
-- Lint runs `go vet` and compile-only `-vet=all`
+- Lint runs compile-only `go test -vet=all` (that includes the default vet analyzers)
 - `AskResult` / `VerifyResult` / nested machine JSON field sets are frozen in `internal/model`
 - CLI command surface + critical flags are frozen in `cmd/opsgraph`
 - Runbook check catalog, core exit-code matrix, demo↔fixture JSON parity, and `OPSGRAPH_*` env exclusivity are frozen
