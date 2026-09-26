@@ -193,7 +193,8 @@ jobs:
       - name: PSScriptAnalyzer (installers)
         shell: pwsh
         run: |
-          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer -RequiredVersion 1.25.0)) {
+          $have = @(Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object { $_.Version -eq [version]'1.25.0' })
+          if ($have.Count -eq 0) {
             Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
           }
           $errs = @()
@@ -760,7 +761,9 @@ jobs:
           tail -n 1 cover-func.txt | tee cover-summary.txt
           go test -count=1 -timeout=2m -fuzz=FuzzOfStablePrefix -fuzztime=5s ./internal/fingerprint
           go test -count=1 -timeout=2m -fuzz=FuzzParse -fuzztime=5s ./internal/runbook
-          go test -count=1 -timeout=2m -fuzz=FuzzServicesYAML -fuzztime=5s ./internal/ingest
+          # -parallel=1: one worker exits with the fuzztime deadline. Four workers
+          # left "context deadline exceeded" on FuzzServicesYAML (run 36265608023).
+          go test -count=1 -timeout=2m -fuzz=FuzzServicesYAML -fuzztime=5s -parallel=1 ./internal/ingest
           {
             echo "## coverage"
             echo ""
