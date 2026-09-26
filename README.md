@@ -73,6 +73,28 @@ Paid connectors, cloud LLMs, MCP, a web UI, `kubectl` exec from the binary,
 and linking `k8s.io/*`. Those stay out so the default build stays one static
 file with `CGO_ENABLED=0`.
 
+### What it is actually worth
+
+This is useful when you have a YAML dump and you cannot hand someone a
+kubeconfig. `ask` names the hottest service, `pack` writes one file, and
+`prove` checks that the evidence IDs and JSON match on the next machine.
+That is the part CI re-runs on every pull request.
+
+It is not a 4× replacement for an on-call engineer who already has `kubectl`,
+a dashboard, and a ticket system. It does not watch the API server, it does
+not remediate, and a same-named workload in two namespaces still shares one
+service id (changing that would change the prove hash).
+
+A Deployment that is 3/3 ready after `ProgressDeadlineExceeded` is reported
+`degraded`, and the next step names that deadline. `readyReplicas: 0` stays
+`unhealthy`. Scaled to zero stays `unknown`.
+
+Optional local summaries use [langchaingo](https://github.com/tmc/langchaingo)
+against Ollama on localhost. They are off unless you pass `--ai`, and `test`
+/ goldens ignore them. LangGraph is not integrated: there is no extra process
+to keep the default build one static file. LangSmith is not integrated: it is
+a hosted product, not an offline dependency.
+
 ## Key capabilities
 
 | Capability | What you get |

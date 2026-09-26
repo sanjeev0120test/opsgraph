@@ -142,6 +142,45 @@ func TestRecommendFullOrder(t *testing.T) {
 	}
 }
 
+func TestRecommendNamesRolloutDeadline(t *testing.T) {
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthDegraded,
+			Labels: map[string]string{"opsgraph_rollout": "rollout deadline exceeded: ReplicaSet \"checkout-api-abc\" has timed out progressing."},
+		},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+	}
+	recs := recommend(res)
+	found := false
+	for _, r := range recs {
+		if strings.Contains(r, "Investigate checkout health (degraded; rollout deadline exceeded:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("next step must name the deadline: %v", recs)
+	}
+}
+
+func TestRecommendDegradedWithoutNoteStaysStable(t *testing.T) {
+	res := model.AskResult{
+		Service:     model.Service{ID: "checkout", Health: model.HealthDegraded},
+		GeneratedAt: time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC),
+	}
+	recs := recommend(res)
+	want := "Investigate checkout health (degraded) and stabilize before further changes."
+	found := false
+	for _, r := range recs {
+		if r == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("fixture wording drifted: %v", recs)
+	}
+}
+
 func TestRecommendEmptyStillHasR6(t *testing.T) {
 	recs := recommend(model.AskResult{Service: model.Service{ID: "x"}, GeneratedAt: time.Now().UTC()})
 	if len(recs) != 2 {

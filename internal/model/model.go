@@ -25,6 +25,17 @@ type Service struct {
 	Sources []string          `json:"sources,omitempty"`
 }
 
+// RolloutNote is the single-line reason a workload looked ready while Kubernetes
+// said otherwise (deadline exceeded, replica failure, not available, job retry).
+// Empty when the snapshot did not record one. Newlines are collapsed so the
+// note can be printed inside a recommendation or a handoff bullet.
+func RolloutNote(s Service) string {
+	if s.Labels == nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(s.Labels["opsgraph_rollout"]), " ")
+}
+
 // IsDependencyStub reports a synthesized edge endpoint with no real connector
 // (fixture/k8s/git/plugin). Hottest/health --strict must not treat it as a
 // paging service.

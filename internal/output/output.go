@@ -148,14 +148,10 @@ func VerifyTable(w io.Writer, vr model.VerifyResult) error {
 
 func serviceHealthLine(svc model.Service) string {
 	health := svc.Health
-	note := ""
-	if svc.Labels != nil {
-		note = strings.Join(strings.Fields(svc.Labels["opsgraph_rollout"]), " ")
+	if note := model.RolloutNote(svc); note != "" {
+		return health + "; " + note
 	}
-	if note == "" {
-		return health
-	}
-	return health + "; " + note
+	return health
 }
 
 func ownerLine(o *model.Owner) string {

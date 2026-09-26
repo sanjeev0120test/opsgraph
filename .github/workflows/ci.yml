@@ -9,8 +9,11 @@ name: ci
 # Tag pushes are owned by release.yml (skip here to avoid duplicate runners).
 
 on:
+  # Push to every branch AND pull_request ran the full matrix twice for the
+  # same SHA (seen on #21 and #23). PRs are validated by pull_request; main
+  # is validated by push. Tag pushes stay on release.yml.
   push:
-    branches: ['**']
+    branches: [main]
     tags-ignore: ['v*']
   pull_request:
   workflow_dispatch:
@@ -466,6 +469,42 @@ jobs:
           "$BIN" impact auth --fixture ./fixtures/incident_checkout --format json | "${JA[@]}" eq:root=auth has:affected has:tree has:max_depth
           "$BIN" demo --format json | "${JA[@]}" has:service has:timeline has:recommendations
           "$BIN" health --fixture ./fixtures/incident_checkout --format json | "${JA[@]}" false:ok has:counts has:by_state gte:total=1
+          # 3/3 ready + ProgressDeadlineExceeded must not look healthy, and the
+          # next step must name the deadline even when the rollout is outside --since.
+          stuck="$(mktemp -d)"
+          cat > "$stuck/k8s-snapshot.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: shop
+  labels:
+    app: checkout
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  conditions:
+  - type: Progressing
+    status: "False"
+    reason: ProgressDeadlineExceeded
+    message: ReplicaSet "checkout-api-abc" has timed out progressing.
+    lastUpdateTime: "2026-07-31T11:40:00Z"
+YAML
+          absbin="$(pwd)/bin/opsgraph"
+          (cd "$stuck" && "$absbin" ask checkout > "$stuck/out.txt")
+          grep -F "SERVICE   checkout (degraded; rollout deadline exceeded" "$stuck/out.txt"
+          grep -F "Investigate checkout health (degraded; rollout deadline exceeded" "$stuck/out.txt"
+          {
+            echo "## stuck rollout"
+            echo ""
+            echo "Deployment at 3/3 ready with ProgressDeadlineExceeded is **degraded**, and the next step names the deadline."
+            echo ""
+            echo '```'
+            grep -F "SERVICE" "$stuck/out.txt"
+            grep -F "Investigate checkout health" "$stuck/out.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
           "$BIN" health --fixture ./fixtures/fleet_healthy --format json | "${JA[@]}" true:ok eqnum:total=2
           "$BIN" health --fixture ./fixtures/fleet_healthy --strict >/dev/null
           "$BIN" ask api --fixture ./fixtures/fleet_healthy --format json | "${JA[@]}" has:service has:recommendations
