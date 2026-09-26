@@ -391,25 +391,7 @@ jobs:
           test "$once_deg" -eq 1
           # Same stuck-rollout contract as ubuntu. Summary stays on the full job.
           stuck="$(mktemp -d)"
-          cat > "$stuck/k8s-snapshot.yaml" <<'YAML'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: checkout-api
-  namespace: shop
-  labels:
-    app: checkout
-spec:
-  replicas: 3
-status:
-  readyReplicas: 3
-  conditions:
-  - type: Progressing
-    status: "False"
-    reason: ProgressDeadlineExceeded
-    message: ReplicaSet "checkout-api-abc" has timed out progressing.
-    lastUpdateTime: "2026-07-31T11:40:00Z"
-YAML
+          cp fixtures/stuck_rollout/k8s-snapshot.yaml "$stuck/k8s-snapshot.yaml"
           absbin="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
           (cd "$stuck" && "$absbin" ask checkout > "$stuck/out.txt")
           grep -F "SERVICE   checkout (degraded; rollout deadline exceeded" "$stuck/out.txt"
@@ -498,25 +480,7 @@ YAML
           # 3/3 ready + ProgressDeadlineExceeded must not look healthy, and the
           # next step must name the deadline even when the rollout is outside --since.
           stuck="$(mktemp -d)"
-          cat > "$stuck/k8s-snapshot.yaml" <<'YAML'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: checkout-api
-  namespace: shop
-  labels:
-    app: checkout
-spec:
-  replicas: 3
-status:
-  readyReplicas: 3
-  conditions:
-  - type: Progressing
-    status: "False"
-    reason: ProgressDeadlineExceeded
-    message: ReplicaSet "checkout-api-abc" has timed out progressing.
-    lastUpdateTime: "2026-07-31T11:40:00Z"
-YAML
+          cp fixtures/stuck_rollout/k8s-snapshot.yaml "$stuck/k8s-snapshot.yaml"
           absbin="$(pwd)/bin/opsgraph"
           (cd "$stuck" && "$absbin" ask checkout > "$stuck/out.txt")
           (cd "$stuck" && "$absbin" handoff checkout > "$stuck/handoff.txt")
