@@ -32,7 +32,7 @@
 
 ## Cross-platform
 
-`CGO_ENABLED=0`, `filepath` for OS paths, `fs.FS` + forward slashes for fixtures, LF via `.gitattributes`. CI covers ubuntu-24.04/macOS/windows, native linux/arm64 smoke, six-target cross-compile, and a race job beside a coverage job on ubuntu. Go build caches are keyed by `go.sum`. Windows/macOS/arm64 use `go test -short` so wall-clock stays on the slowest ubuntu job.
+`CGO_ENABLED=0`, `filepath` for OS paths, `fs.FS` + forward slashes for fixtures, LF via `.gitattributes`. CI covers ubuntu-24.04/macOS/windows, native linux/arm64 smoke, six-target cross-compile, and a race job beside a coverage job on ubuntu. Go build caches are keyed by `go.sum` and are restored on pull requests. Windows/macOS/arm64 use `go test -short`. With a warm cache the slowest job is Windows, which unpacks the module cache before those tests.
 
 ## Kubernetes snapshot
 

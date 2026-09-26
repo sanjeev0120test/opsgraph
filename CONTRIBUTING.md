@@ -9,10 +9,10 @@ Optional local smoke (keeps the laptop light; no `-race`):
 - Windows: `pwsh scripts/verify.ps1` (`go test -short` — skips the 21-loop prove burn)
 - Unix: `bash scripts/verify.sh` or `make quick`
 
-CI: ubuntu runs the full suite (`-race`, `./...`, 21-loop prove, module-graph rebuilds).
+CI: ubuntu runs the full suite (`-race`, `./...`, coverage floors, 21-loop prove, module-graph rebuilds).
 Windows/macOS/arm64 use `-short` on OS-sensitive packages only (`cmd/opsgraph`,
-`internal/store`, `internal/ingest`, `internal/config`) so the wall-clock stays
-on the ubuntu race job.
+`internal/store`, `internal/ingest`, `internal/config`). With a warm Go build
+cache the slowest job is Windows (module-cache unpack, then those tests).
 
 ## Fixtures
 
