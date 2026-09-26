@@ -17,7 +17,9 @@ on:
     branches: [main]
     tags-ignore: ['v*']
   pull_request:
-  workflow_dispatch:
+  # No workflow_dispatch. zizmor treats that trigger as a publisher, and a
+  # cache saved from it can replay a poisoned Go build cache. Re-run a
+  # push or pull_request run from the Actions tab instead.
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
