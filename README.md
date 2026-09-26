@@ -91,9 +91,10 @@ A Deployment that is 3/3 ready after `ProgressDeadlineExceeded` is reported
 
 Optional local summaries use [langchaingo](https://github.com/tmc/langchaingo)
 against Ollama on localhost. They are off unless you pass `--ai`, and `test`
-/ goldens ignore them. LangGraph is not integrated: there is no extra process
-to keep the default build one static file. LangSmith is not integrated: it is
-a hosted product, not an offline dependency.
+/ goldens ignore them. LangGraph is not integrated: it would be a second
+runtime beside this static binary, and this tool does not shell out.
+LangSmith is not integrated: it is a hosted service, not an offline
+dependency.
 
 ## Key capabilities
 

@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAlertActive(t *testing.T) {
 	cases := []struct {
@@ -80,6 +83,24 @@ func TestIsSystemAgent(t *testing.T) {
 	}
 	if IsSystemAgent("checkout") {
 		t.Fatal("checkout is an app")
+	}
+}
+
+func TestRolloutNote(t *testing.T) {
+	if RolloutNote(Service{}) != "" {
+		t.Fatal("missing label must be empty")
+	}
+	if RolloutNote(Service{Labels: map[string]string{"opsgraph_rollout": "  \n\t "}}) != "" {
+		t.Fatal("whitespace-only note must be empty")
+	}
+	got := RolloutNote(Service{Labels: map[string]string{"opsgraph_rollout": "deadline\nexceeded"}})
+	if got != "deadline exceeded" {
+		t.Fatalf("collapsed = %q", got)
+	}
+	long := strings.Repeat("a", 200)
+	capped := RolloutNote(Service{Labels: map[string]string{"opsgraph_rollout": long}})
+	if len(capped) > 160 || !strings.HasSuffix(capped, "...") {
+		t.Fatalf("cap len=%d %q", len(capped), capped)
 	}
 }
 

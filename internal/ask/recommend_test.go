@@ -163,6 +163,48 @@ func TestRecommendNamesRolloutDeadline(t *testing.T) {
 	}
 }
 
+func TestRecommendCitesRolloutEvidence(t *testing.T) {
+	note := "rollout deadline exceeded: ReplicaSet checkout-api-abc has timed out progressing."
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthDegraded,
+			Labels: map[string]string{"opsgraph_rollout": note},
+		},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+		Evidence: []model.Evidence{{
+			ID:      "ev-k8s-rollout-shop-checkout-api",
+			Summary: "rollout checkout-api (3/3 ready); " + note,
+		}},
+	}
+	recs := recommend(res)
+	found := false
+	for _, r := range recs {
+		if strings.Contains(r, "Evidence: ev-k8s-rollout-shop-checkout-api.") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing evidence id: %v", recs)
+	}
+}
+
+func TestRecommendHealthyIgnoresStaleRolloutLabel(t *testing.T) {
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthHealthy,
+			Labels: map[string]string{"opsgraph_rollout": "rollout deadline exceeded"},
+		},
+		GeneratedAt: time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
+	}
+	for _, r := range recommend(res) {
+		if strings.Contains(r, "Investigate") {
+			t.Fatalf("healthy service must not be investigated for a stale label: %v", recommend(res))
+		}
+	}
+}
+
 func TestRecommendDegradedWithoutNoteStaysStable(t *testing.T) {
 	res := model.AskResult{
 		Service:     model.Service{ID: "checkout", Health: model.HealthDegraded},

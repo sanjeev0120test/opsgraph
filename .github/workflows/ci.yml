@@ -389,6 +389,32 @@ jobs:
           test "$vrb" -eq 1
           test "$strict_inc" -eq 1
           test "$once_deg" -eq 1
+          # Same stuck-rollout contract as ubuntu. Summary stays on the full job.
+          stuck="$(mktemp -d)"
+          cat > "$stuck/k8s-snapshot.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: shop
+  labels:
+    app: checkout
+spec:
+  replicas: 3
+status:
+  readyReplicas: 3
+  conditions:
+  - type: Progressing
+    status: "False"
+    reason: ProgressDeadlineExceeded
+    message: ReplicaSet "checkout-api-abc" has timed out progressing.
+    lastUpdateTime: "2026-07-31T11:40:00Z"
+YAML
+          absbin="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
+          (cd "$stuck" && "$absbin" ask checkout > "$stuck/out.txt")
+          grep -F "SERVICE   checkout (degraded; rollout deadline exceeded" "$stuck/out.txt"
+          grep -F "Investigate checkout health (degraded; rollout deadline exceeded" "$stuck/out.txt"
+          grep -F "CHANGES   none in window" "$stuck/out.txt"
       - name: Full CLI smoke (ubuntu)
         if: ${{ matrix.smoke == 'full' }}
         shell: bash
@@ -493,15 +519,19 @@ status:
 YAML
           absbin="$(pwd)/bin/opsgraph"
           (cd "$stuck" && "$absbin" ask checkout > "$stuck/out.txt")
+          (cd "$stuck" && "$absbin" handoff checkout > "$stuck/handoff.txt")
           grep -F "SERVICE   checkout (degraded; rollout deadline exceeded" "$stuck/out.txt"
           grep -F "Investigate checkout health (degraded; rollout deadline exceeded" "$stuck/out.txt"
+          grep -F "CHANGES   none in window" "$stuck/out.txt"
+          grep -F "Rollout: rollout deadline exceeded" "$stuck/handoff.txt"
           {
             echo "## stuck rollout"
             echo ""
-            echo "Deployment at 3/3 ready with ProgressDeadlineExceeded is **degraded**, and the next step names the deadline."
+            echo "Deployment at 3/3 ready with ProgressDeadlineExceeded is **degraded**. The rollout is outside the window, and the next step still names the deadline."
             echo ""
             echo '```'
             grep -F "SERVICE" "$stuck/out.txt"
+            grep -F "CHANGES" "$stuck/out.txt"
             grep -F "Investigate checkout health" "$stuck/out.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

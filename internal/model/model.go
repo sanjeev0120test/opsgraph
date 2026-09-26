@@ -33,7 +33,19 @@ func RolloutNote(s Service) string {
 	if s.Labels == nil {
 		return ""
 	}
-	return strings.Join(strings.Fields(s.Labels["opsgraph_rollout"]), " ")
+	note := strings.Join(strings.Fields(s.Labels["opsgraph_rollout"]), " ")
+	const max = 160
+	if note == "" || len(note) <= max {
+		return note
+	}
+	cut := max - 3
+	for cut > 0 && cut < len(note) && note[cut]&0xC0 == 0x80 {
+		cut--
+	}
+	if cut < 1 {
+		cut = 1
+	}
+	return note[:cut] + "..."
 }
 
 // IsDependencyStub reports a synthesized edge endpoint with no real connector

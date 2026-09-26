@@ -20,13 +20,20 @@ func TestHandoffNamesRolloutWhenNoRecentChange(t *testing.T) {
 		GeneratedAt:     time.Date(2026, 9, 26, 17, 0, 0, 0, time.UTC),
 		Window:          "60m",
 		Recommendations: []string{"Investigate checkout health (degraded; rollout deadline exceeded second line) and stabilize before further changes."},
+		Evidence: []model.Evidence{{
+			ID:      "ev-k8s-rollout-shop-checkout-api",
+			Summary: "rollout checkout-api (3/3 ready); rollout deadline exceeded second line",
+		}},
 	}
 	note := handoffNote(res)
 	if !strings.Contains(note, "Health: **degraded** (rollout deadline exceeded second line)") {
 		t.Fatalf("health line:\n%s", note)
 	}
-	if !strings.Contains(note, "- Rollout: rollout deadline exceeded second line") {
+	if !strings.Contains(note, "- Rollout: rollout deadline exceeded second line [ev-k8s-rollout-shop-checkout-api]") {
 		t.Fatalf("what happened:\n%s", note)
+	}
+	if !strings.Contains(note, "Investigate checkout health (degraded; rollout deadline exceeded second line)") {
+		t.Fatalf("next step missing:\n%s", note)
 	}
 	if strings.Contains(note, "\nsecond line") {
 		t.Fatalf("note must stay one line:\n%s", note)

@@ -102,7 +102,11 @@ func handoffNote(res model.AskResult) string {
 		b.WriteString("- No change inside the 30m suspect window.\n")
 	}
 	if note := model.RolloutNote(res.Service); note != "" {
-		fmt.Fprintf(&b, "- Rollout: %s\n", note)
+		fmt.Fprintf(&b, "- Rollout: %s", note)
+		if id := ask.RolloutEvidenceID(res); id != "" {
+			fmt.Fprintf(&b, " [%s]", id)
+		}
+		b.WriteString("\n")
 	}
 	for _, c := range res.Correlations {
 		fmt.Fprintf(&b, "- Linked: %s", c.Summary)
