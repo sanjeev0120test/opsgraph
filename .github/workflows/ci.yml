@@ -48,6 +48,9 @@ jobs:
       - name: Go build cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-lint-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -180,6 +183,9 @@ jobs:
       - name: PSScriptAnalyzer module cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
           path: ~/.local/share/powershell/Modules/PSScriptAnalyzer
           key: psscriptanalyzer-linux-v1
       - name: PSScriptAnalyzer (installers)
@@ -219,6 +225,9 @@ jobs:
       - name: Go build cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-staticcheck-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -266,6 +275,9 @@ jobs:
       - name: Go build cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
           path: ${{ runner.os == 'Windows' && '~\AppData\Local\go-build' || runner.os == 'macOS' && '~/Library/Caches/go-build' || '~/.cache/go-build' }}
           key: gocache-${{ runner.os }}-${{ runner.arch }}-test-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -765,6 +777,9 @@ jobs:
       - name: Go build cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-cover-${{ hashFiles('go.sum') }}
           restore-keys: |
@@ -824,6 +839,9 @@ jobs:
       - name: Go build cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
+          # PRs restore only. A pull_request save can poison a later
+          # workflow_dispatch on the same ref (zizmor cache-poisoning).
+          lookup-only: ${{ github.event_name == 'pull_request' }}
           path: ~/.cache/go-build
           key: gocache-${{ runner.os }}-${{ runner.arch }}-cross-${{ hashFiles('go.sum') }}
           restore-keys: |
