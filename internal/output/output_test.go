@@ -37,6 +37,25 @@ func mustParseTime(t *testing.T, s string) time.Time {
 	return ts
 }
 
+func TestTableShowsRolloutNote(t *testing.T) {
+	var buf bytes.Buffer
+	res := model.AskResult{
+		Service: model.Service{
+			ID:     "checkout",
+			Health: model.HealthDegraded,
+			Labels: map[string]string{"opsgraph_rollout": "rollout deadline exceeded"},
+		},
+		Window:      "60m",
+		GeneratedAt: mustParseTime(t, "2026-07-31T12:00:00Z"),
+	}
+	if err := output.Table(&buf, res); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "SERVICE   checkout (degraded; rollout deadline exceeded)") {
+		t.Fatalf("table = %s", buf.String())
+	}
+}
+
 func TestJSONDoesNotEscapeHTML(t *testing.T) {
 	var buf bytes.Buffer
 	v := model.AskResult{

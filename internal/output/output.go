@@ -26,7 +26,7 @@ func JSON(w io.Writer, v any) error {
 func Table(w io.Writer, res model.AskResult) error {
 	p := func(format string, args ...any) { fmt.Fprintf(w, format, args...) }
 
-	p("SERVICE   %s (%s)", res.Service.ID, res.Service.Health)
+	p("SERVICE   %s (%s)", res.Service.ID, serviceHealthLine(res.Service))
 	if res.Owner != nil {
 		p("   owner: %s", ownerLine(res.Owner))
 	}
@@ -144,6 +144,18 @@ func VerifyTable(w io.Writer, vr model.VerifyResult) error {
 		}
 	}
 	return nil
+}
+
+func serviceHealthLine(svc model.Service) string {
+	health := svc.Health
+	note := ""
+	if svc.Labels != nil {
+		note = strings.Join(strings.Fields(svc.Labels["opsgraph_rollout"]), " ")
+	}
+	if note == "" {
+		return health
+	}
+	return health + "; " + note
 }
 
 func ownerLine(o *model.Owner) string {

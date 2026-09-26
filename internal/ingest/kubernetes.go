@@ -147,11 +147,15 @@ func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time
 	for _, id := range svcIDs {
 		list := bySvc[id]
 		// Roll up worst replica health so a healthy deploy cannot hide an unhealthy one.
+		// On a tie, keep the workload that explains why (rollout note).
 		worst := list[0]
 		for _, d := range list[1:] {
-			if healthRank(d.health()) > healthRank(worst.health()) {
+			if betterWorkload(d, worst) {
 				worst = d
 			}
+		}
+		if note := joinRolloutNotes(list); note != "" {
+			worst.rolloutNote = note
 		}
 		if err := applyDeploymentHealth(s, worst); err != nil {
 			return err
@@ -269,13 +273,38 @@ func applyDeploymentHealth(s *store.Store, d k8sDeployment) error {
 	if name := strings.TrimSpace(d.Name); name != "" && !strings.EqualFold(name, svc.ID) {
 		svc.Aliases = addAlias(svc.Aliases, name)
 	}
-	if note := strings.TrimSpace(d.rolloutNote); d.forceDegraded && note != "" {
+	note := strings.TrimSpace(d.rolloutNote)
+	if note != "" {
 		if svc.Labels == nil {
 			svc.Labels = map[string]string{}
 		}
 		svc.Labels["opsgraph_rollout"] = note
+	} else if svc.Labels != nil {
+		// A recovered scrape must not leave yesterday's deadline on the service.
+		delete(svc.Labels, "opsgraph_rollout")
 	}
 	return s.UpsertService(*svc)
+}
+
+func betterWorkload(d, worst k8sDeployment) bool {
+	if healthRank(d.health()) != healthRank(worst.health()) {
+		return healthRank(d.health()) > healthRank(worst.health())
+	}
+	return strings.TrimSpace(worst.rolloutNote) == "" && strings.TrimSpace(d.rolloutNote) != ""
+}
+
+func joinRolloutNotes(list []k8sDeployment) string {
+	seen := map[string]bool{}
+	var parts []string
+	for _, d := range list {
+		note := strings.TrimSpace(d.rolloutNote)
+		if note == "" || seen[note] {
+			continue
+		}
+		seen[note] = true
+		parts = append(parts, note)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func addAlias(aliases []string, a string) []string {
@@ -409,15 +438,23 @@ func addSource(sources []string, s string) []string {
 	return append(sources, s)
 }
 
-// stuckRolloutWarning explains a false all-clear: replicas are ready, but
-// Kubernetes recorded a failed rollout. Available=False and Job retries stay
-// in the evidence summary without a stderr line so a normal surge is quieter.
+// stuckRolloutWarning explains a false all-clear: replicas are ready, but a
+// condition says otherwise. Partial replica failures stay quiet here; they
+// are already degraded and the SERVICE line carries the note.
 func stuckRolloutWarning(d k8sDeployment) string {
 	if !d.forceDegraded {
 		return ""
 	}
 	note := strings.TrimSpace(d.rolloutNote)
-	if !strings.Contains(note, "deadline") && !strings.Contains(note, "replica failure") {
+	var why string
+	switch {
+	case strings.Contains(note, "deadline") || strings.Contains(note, "replica failure"):
+		why = "Replica counts can look healthy while this rollout failed"
+	case strings.Contains(note, "not available"):
+		why = "Replica counts can look healthy while Kubernetes reports the workload is not available"
+	case strings.Contains(note, "retrying"):
+		why = "The Job is still retrying after a pod failure"
+	default:
 		return ""
 	}
 	name := kubectlToken(d.Name)
@@ -432,12 +469,13 @@ func stuckRolloutWarning(d k8sDeployment) string {
 		target = ns + "/" + target
 	}
 	kind := workloadKindNoun(d.Kind)
-	msg := fmt.Sprintf("%s %s is %s (%d/%d ready). Replica counts can look healthy while this rollout failed",
-		kind, target, note, d.Ready, d.Desired)
+	msg := fmt.Sprintf("%s %s is %s (%d/%d ready). %s",
+		kind, target, note, d.Ready, d.Desired, why)
 	if name == "" {
 		return msg
 	}
-	return msg + fmt.Sprintf(". Next: kubectl rollout status %s/%s%s", workloadKubectlKind(d.Kind), name, kubectlNS(d.Namespace))
+	// describe returns immediately. rollout status blocks until the deadline fires again.
+	return msg + fmt.Sprintf(". Next: kubectl describe %s/%s%s", workloadKubectlKind(d.Kind), name, kubectlNS(d.Namespace))
 }
 
 // kubectlToken keeps the suggested command a single safe argument.

@@ -337,11 +337,12 @@ func assessWorkload(o nativeObject) (desired, ready int, forceDegraded bool, not
 	switch kind {
 	case "job":
 		if jobStillRetrying(o, desired) {
-			return desired, ready, true, "retrying after pod failure"
+			// Downgrade only a false all-clear. Partial success is already degraded.
+			return desired, ready, deploymentHealth(desired, ready) == "healthy", "retrying after pod failure"
 		}
 	case "deployment", "statefulset", "daemonset", "replicaset":
-		if ok, n := rolloutDegradedNote(o); ok && deploymentHealth(desired, ready) == "healthy" {
-			return desired, ready, true, n
+		if ok, n := rolloutDegradedNote(o); ok {
+			return desired, ready, deploymentHealth(desired, ready) == "healthy", n
 		}
 	}
 	return desired, ready, false, ""
@@ -371,8 +372,12 @@ func workloadReplicas(o nativeObject, kind string) (desired, ready int) {
 		if jobTerminalFailure(o) {
 			return desired, 0
 		}
-		// In progress, including a retry that still has active pods: do not page
-		// as fully down. assessWorkload marks the retry case degraded.
+		// A retry with some completions already done should show that progress
+		// (degraded), not a full ready count. Zero successes still look ready
+		// so assessWorkload can mark them degraded instead of unhealthy.
+		if o.Status.Failed > 0 && o.Status.Active > 0 && o.Status.Succeeded > 0 && o.Status.Succeeded < desired {
+			return desired, o.Status.Succeeded
+		}
 		return desired, desired
 	}
 	desired = 1
@@ -431,20 +436,25 @@ func jobStillRetrying(o nativeObject, desired int) bool {
 // condition counts even when status.failed was omitted. Pods that failed while
 // status.active is still > 0 are retries, not a terminal failure.
 func jobTerminalFailure(o nativeObject) bool {
-	if condStatus(findCondition(o, "failed")) == "true" {
+	if anyConditionTrue(o, "failed") {
 		return true
 	}
 	return o.Status.Failed > 0 && o.Status.Active == 0
 }
 
-func findCondition(o nativeObject, typ string) any {
+// anyConditionTrue reports whether any condition of typ is true. The first
+// matching status is not enough: a dump can list Failed=False and then Failed=True.
+func anyConditionTrue(o nativeObject, typ string) bool {
 	typ = strings.ToLower(strings.TrimSpace(typ))
 	for _, c := range o.Status.Conditions {
-		if strings.ToLower(strings.TrimSpace(c.Type)) == typ {
-			return c.Status
+		if strings.ToLower(strings.TrimSpace(c.Type)) != typ {
+			continue
+		}
+		if condStatus(c.Status) == "true" {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 // condStatus accepts kubectl's quoted "True"/"False" and YAML 1.1 booleans
@@ -458,9 +468,24 @@ func condStatus(v any) string {
 			return "true"
 		}
 		return "false"
+	case int:
+		return numericStatus(t != 0)
+	case int64:
+		return numericStatus(t != 0)
+	case uint64:
+		return numericStatus(t != 0)
+	case float64:
+		return numericStatus(t != 0)
 	default:
 		return ""
 	}
+}
+
+func numericStatus(on bool) string {
+	if on {
+		return "true"
+	}
+	return "false"
 }
 
 // rolloutDegradedNote reports Deployment/StatefulSet/DaemonSet/ReplicaSet
@@ -468,6 +493,20 @@ func condStatus(v any) string {
 // evidence line is stable when several conditions match.
 func rolloutDegradedNote(o nativeObject) (bool, string) {
 	seen := map[string]bool{}
+	rank := map[string]int{
+		"rollout deadline exceeded": 3,
+		"replica failure":           2,
+		"not available":             1,
+	}
+	bestRank := 0
+	var detail string
+	consider := func(phrase, message string) {
+		seen[phrase] = true
+		if rank[phrase] > bestRank {
+			bestRank = rank[phrase]
+			detail = clipConditionMessage(message)
+		}
+	}
 	for _, c := range o.Status.Conditions {
 		typ := strings.ToLower(strings.TrimSpace(c.Type))
 		st := condStatus(c.Status)
@@ -475,15 +514,15 @@ func rolloutDegradedNote(o nativeObject) (bool, string) {
 		switch typ {
 		case "progressing":
 			if st == "false" && strings.EqualFold(reason, "ProgressDeadlineExceeded") {
-				seen["rollout deadline exceeded"] = true
+				consider("rollout deadline exceeded", c.Message)
 			}
 		case "replicafailure":
 			if st == "true" {
-				seen["replica failure"] = true
+				consider("replica failure", c.Message)
 			}
 		case "available":
 			if st == "false" {
-				seen["not available"] = true
+				consider("not available", c.Message)
 			}
 		}
 	}
@@ -497,7 +536,27 @@ func rolloutDegradedNote(o nativeObject) (bool, string) {
 	if len(parts) == 0 {
 		return false, ""
 	}
-	return true, strings.Join(parts, "; ")
+	note := strings.Join(parts, "; ")
+	if detail != "" {
+		note += ": " + detail
+	}
+	return true, note
+}
+
+func clipConditionMessage(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const max = 120
+	if s == "" || len(s) <= max {
+		return s
+	}
+	cut := max - 3
+	for cut > 0 && cut < len(s) && s[cut]&0xC0 == 0x80 {
+		cut--
+	}
+	if cut < 1 {
+		cut = 1
+	}
+	return s[:cut] + "..."
 }
 
 func deploymentUpdatedAt(o nativeObject) time.Time {
