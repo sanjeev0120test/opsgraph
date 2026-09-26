@@ -88,7 +88,14 @@ Workload health comes from replica readiness: `spec.replicas` vs
 `status.desiredNumberScheduled` vs `status.numberReady` for DaemonSets.
 A full ready count is not treated as healthy when a condition contradicts it:
 `Progressing=False` / `ProgressDeadlineExceeded`, `ReplicaFailure=True`, or
-`Available=False` marks the service `degraded`. The human SERVICE line repeats
+`Available=False` marks the service `degraded`. The same `degraded` result
+applies when `readyReplicas` is full but `availableReplicas` (DaemonSets:
+`numberAvailable` / `numberUnavailable`) says capacity is short and the
+snapshot has no `Available` condition. An explicit `Available=True` is kept:
+that is Kubernetes allowing `maxUnavailable` during a rollout. When
+`metadata.generation` is ahead of `status.observedGeneration`, health is
+`unknown` (the replica counts describe an older spec), and the next step says
+so. A missing generation field is not treated as stale. The human SERVICE line repeats
 the reason (`opsgraph_rollout`). The next-step sentence and `handoff` repeat
 that reason, including when the rollout is outside `--since` and CHANGES is
 empty, and they cite the rollout evidence ID when one exists. Stderr names a false all-clear and suggests

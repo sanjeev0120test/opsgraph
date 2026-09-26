@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: shop
+  labels:
+    app: checkout
+  generation: 4
+  creationTimestamp: "2026-07-31T11:40:00Z"
+spec:
+  replicas: 3
+status:
+  replicas: 3
+  readyReplicas: 3
+  observedGeneration: 3

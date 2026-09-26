@@ -38,8 +38,21 @@ type k8sDeployment struct {
 	// condition says the rollout failed, the object is not Available, or a
 	// Job is still retrying. Unexported so dialect packs stay byte-identical.
 	forceDegraded bool
+	// forceUnknown marks a workload whose status has not observed the current
+	// spec generation. Replica counts from that status must not be reported
+	// as healthy. Unexported so dialect packs stay byte-identical.
+	forceUnknown bool
 	// rolloutNote is a short, stable phrase for evidence and warnings.
 	rolloutNote string
+	// owners are controller refs for ReplicaSets. Unexported; dialect packs
+	// do not carry them.
+	owners []k8sOwner
+}
+
+// k8sOwner is a same-namespace controller reference.
+type k8sOwner struct {
+	Kind string
+	Name string
 }
 
 // workloadLabel names a workload for evidence ids and summaries. Deployments
@@ -81,9 +94,14 @@ func deploymentHealth(desired, ready int) string {
 }
 
 // health is replica readiness, downgraded when a condition says the replica
-// counts are a false all-clear. Unknown (scaled to zero, CronJob spec) stays
-// unknown: a stale condition must not turn "no replicas" into a page.
+// counts are a false all-clear. A status that has not observed the current
+// spec is unknown: those counts describe an older object. Unknown (scaled to
+// zero, CronJob spec) stays unknown: a stale condition must not turn "no
+// replicas" into a page.
 func (d k8sDeployment) health() string {
+	if d.forceUnknown {
+		return model.HealthUnknown
+	}
 	h := deploymentHealth(d.Desired, d.Ready)
 	if d.forceDegraded && h == model.HealthHealthy {
 		return model.HealthDegraded
@@ -154,7 +172,7 @@ func ingestK8sFiles(s *store.Store, fsys fs.FS, depFile, evFile string, now time
 				worst = d
 			}
 		}
-		if note := joinRolloutNotes(list); note != "" {
+		if note := joinRolloutNotes(list, worst.forceUnknown); note != "" {
 			worst.rolloutNote = note
 		}
 		if err := applyDeploymentHealth(s, worst); err != nil {
@@ -287,16 +305,39 @@ func applyDeploymentHealth(s *store.Store, d k8sDeployment) error {
 }
 
 func betterWorkload(d, worst k8sDeployment) bool {
-	if healthRank(d.health()) != healthRank(worst.health()) {
-		return healthRank(d.health()) > healthRank(worst.health())
+	if workloadSignalRank(d) != workloadSignalRank(worst) {
+		return workloadSignalRank(d) > workloadSignalRank(worst)
 	}
 	return strings.TrimSpace(worst.rolloutNote) == "" && strings.TrimSpace(d.rolloutNote) != ""
 }
 
-func joinRolloutNotes(list []k8sDeployment) string {
+// workloadSignalRank orders rollup. A stale status beats a full ready count
+// (that count is not about the current spec) and loses to a real degraded
+// or unhealthy sibling, whose replica evidence is stronger.
+func workloadSignalRank(d k8sDeployment) int {
+	switch d.health() {
+	case model.HealthUnhealthy:
+		return 4
+	case model.HealthDegraded:
+		return 3
+	default:
+		if d.forceUnknown {
+			return 2
+		}
+		if d.health() == model.HealthHealthy {
+			return 1
+		}
+		return 0
+	}
+}
+
+func joinRolloutNotes(list []k8sDeployment, includeStale bool) string {
 	seen := map[string]bool{}
 	var parts []string
 	for _, d := range list {
+		if d.forceUnknown && !includeStale {
+			continue
+		}
 		note := strings.TrimSpace(d.rolloutNote)
 		if note == "" || seen[note] {
 			continue
@@ -439,13 +480,19 @@ func addSource(sources []string, s string) []string {
 }
 
 // stuckRolloutWarning explains a false all-clear: replicas are ready, but a
-// condition says otherwise. Partial replica failures stay quiet here; they
-// are already degraded and the SERVICE line carries the note.
+// condition or a stale status says otherwise. Partial replica failures stay
+// quiet here; they are already degraded and the SERVICE line carries the note.
 func stuckRolloutWarning(d k8sDeployment) string {
+	note := strings.TrimSpace(d.rolloutNote)
+	if d.forceUnknown {
+		if note == "" {
+			return ""
+		}
+		return stuckWarnLine(d, note, "Replica counts describe an older spec")
+	}
 	if !d.forceDegraded {
 		return ""
 	}
-	note := strings.TrimSpace(d.rolloutNote)
 	var why string
 	switch {
 	case strings.Contains(note, "deadline") || strings.Contains(note, "replica failure"):
@@ -457,6 +504,10 @@ func stuckRolloutWarning(d k8sDeployment) string {
 	default:
 		return ""
 	}
+	return stuckWarnLine(d, note, why)
+}
+
+func stuckWarnLine(d k8sDeployment, note, why string) string {
 	name := kubectlToken(d.Name)
 	target := name
 	if target == "" {
