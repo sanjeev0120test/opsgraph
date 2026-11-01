@@ -41,7 +41,7 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 2
     permissions:
       contents: read
       actions: write
@@ -175,7 +175,7 @@ jobs:
   installers:
     name: PSScriptAnalyzer
     runs-on: ubuntu-24.04
-    timeout-minutes: 3
+    timeout-minutes: 2
     permissions:
       contents: read
       actions: write
@@ -216,7 +216,7 @@ jobs:
   staticcheck:
     name: staticcheck
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 2
     permissions:
       contents: read
       actions: write
@@ -251,7 +251,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 12
+    timeout-minutes: 2
     permissions:
       contents: read
       actions: write
@@ -728,7 +728,7 @@ jobs:
   cover:
     name: cover + fuzz
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 2
     permissions:
       contents: read
       actions: write
@@ -791,7 +791,7 @@ jobs:
   cross:
     name: cross + release-pack
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 2
     permissions:
       contents: read
       actions: write
@@ -893,7 +893,7 @@ jobs:
   vuln:
     name: govulncheck
     runs-on: ubuntu-24.04
-    timeout-minutes: 4
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -916,7 +916,7 @@ jobs:
   arm64-smoke:
     name: linux/arm64 smoke
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 6
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -984,7 +984,7 @@ jobs:
     name: all checks passed
     needs: [lint, installers, staticcheck, test, cover, cross, vuln, arm64-smoke, repro, gitleaks, zizmor, actionlint, dependency-review]
     runs-on: ubuntu-24.04
-    timeout-minutes: 1
+    timeout-minutes: 2
     if: always()
     steps:
       - name: Aggregate job results
